@@ -26,7 +26,7 @@ Repo: https://github.com/anhvth/opencodex-desktop (source in `~/projects/opencod
 ## Everything the user edits
 
 `~/.config/opencodex-desktop/config.yaml` (create with `opencodex-desktop init`). Fields: `codex_home`
-(list of candidates; `$CODEX_HOME` wins), `listen`, `openai.{enabled,include}`,
+(list of candidates; `$CODEX_HOME` wins), `listen`, `openai.{enabled,include,context_window: {slug: cap}}`, `max_context_window` (cap for every model),
 `anthropic.{enabled, api_key|api_key_env|api_key_file, base_url, models, include}` (built-in Claude
 provider; key defaults to `$ANTHROPIC_API_KEY`, base_url to `https://api.anthropic.com/v1`),
 `default_model`, `claude_app.ssh_hosts` (Claude app SSH sessions via a public tunnel),

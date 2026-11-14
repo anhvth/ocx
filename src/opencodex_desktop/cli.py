@@ -120,6 +120,10 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     ui.head("Claude")
     apply_claude_config(cfg, d)
 
+    from .pi_setup import apply_pi_config
+    ui.head("Pi")
+    apply_pi_config(cfg, d)
+
     ui.head("Router")
     if _stop_router(cfg, quiet=True):
         ui.info("stopped the previous router")
@@ -136,6 +140,7 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     ui.info("Restart the Codex app to pick up the model list. The codex CLI attaches to a background")
     ui.info("daemon that keeps its old list: `codex app-server daemon restart` (closes open codex sessions).")
     ui.info("Claude Code (`claude`, `cl`) sees the new models in /model right away.")
+    ui.info("Pi: restart or /reload to refresh the scoped /model list.")
     ui.info("Turn it off any time with: opencodex-desktop off")
     return 0
 
@@ -148,6 +153,8 @@ def cmd_off(cfg: Config, args: argparse.Namespace) -> int:
     _stop_router(cfg)
     restore_codex_config(cfg, {r.slug for r in load_routes()})
     restore_claude_config(cfg)
+    from .pi_setup import restore_pi_config
+    restore_pi_config(cfg)
     return 0
 
 

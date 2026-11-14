@@ -2,7 +2,7 @@
 
 Use **Qwen (Alibaba), Claude (Anthropic), local vLLM, or any OpenAI-compatible model** in the **Codex
 Desktop app** and the `codex` CLI, side by side with your normal ChatGPT models (fast mode included),
-and the same models (GPT included) in **Claude Code** and the **Claude desktop app**.
+and the same models (GPT included) in **Pi**, **Claude Code** and the **Claude desktop app**.
 One YAML file, one command.
 
 ```
@@ -44,8 +44,8 @@ No install? Run any command as
 
 | command | what it does |
 |---|---|
-| `start` (default) | reads the YAML, checks every provider, writes the model catalog and `$CODEX_HOME/config.toml`, and (re)starts the router in the background |
-| `off` | stops the router and removes its settings from `config.toml`, putting Codex back to its defaults |
+| `start` (default) | reads the YAML, checks every provider, configures Codex, Claude and Pi, and (re)starts the router in the background |
+| `off` | stops the router, removes its Codex/Claude settings, and restores Pi's previous model scope and defaults |
 | `status` | shows the login, the router, what Codex points at, and the routed models with their context windows |
 | `stop` | stops only the router (Codex stays pointed at it) |
 | `init` | writes an example config (`--force` overwrites an existing one) |
@@ -127,6 +127,26 @@ extended-thinking budget (`low` 4k, `medium` 16k, `high` 32k tokens, capped to f
 | `$CODEX_HOME/config.toml` | gets `model_provider`, `model_catalog_json`, `[model_providers.opencodex-desktop]`; backed up as `config.toml.bak-opencodex-desktop-*` before every change |
 
 API keys are read when needed and never written into Codex's config or the state dir.
+
+## Pi
+
+If Pi's agent directory exists, `start` also configures Pi using the **same discovery results as Codex**.
+The YAML above controls the list; do not maintain a separate list in Pi.
+
+- Adds one `opencodex-desktop` provider to `~/.pi/agent/models.json`, using the router's Responses API.
+  Model names are the canonical slugs, with context, output limits and reasoning levels from discovery.
+- Sets `enabledModels` to `opencodex-desktop/*`, so `/model` defaults to a clean, project-managed list.
+  Pi's Tab key can still switch the picker to all providers; existing providers and logins are preserved.
+- Selects an available startup model (retains the current slug if available, otherwise the YAML default
+  or first discovered model). Resumed sessions retain their model: use `/model` to switch old sessions.
+- Honors `PI_CODING_AGENT_DIR`. Saves previous managed settings in `opencodex-desktop-backup.json`
+  inside that directory; `off` restores them without reverting unrelated settings.
+- Provider health checks synchronize Pi's list too. Restart Pi or `/reload` after a model-list change
+  to refresh its scope. GPT models use the existing Codex login through the local router.
+
+Pi reads the local router token at request time; upstream API keys are not copied into Pi's config.
+Unknown maximum output limits use Pi's conservative 16k default. Pricing is not imported, so Pi's
+cost display for these models is not a billing estimate.
 
 ## Claude Code and the Claude desktop app
 

@@ -67,6 +67,9 @@ class Config:
     providers: list[ProviderCfg]
     # Claude app SSH sessions: ssh aliases allowed (non-empty => the router gets a public tunnel)
     claude_ssh_hosts: list[str] = field(default_factory=list)
+    # context window caps: one for every model, and per GPT model (openai.context_window)
+    max_context_window: int | None = None
+    openai_context: dict[str, int] = field(default_factory=dict)
 
     @property
     def anthropic_base(self) -> str:
@@ -223,6 +226,8 @@ def load(path: str | os.PathLike[str] | None = None) -> Config:
         default_model=raw.get("default_model"),
         providers=providers,
         claude_ssh_hosts=[str(h) for h in ((raw.get("claude_app") or {}).get("ssh_hosts") or [])],
+        max_context_window=int(raw["max_context_window"]) if raw.get("max_context_window") else None,
+        openai_context={str(k): int(v) for k, v in (openai.get("context_window") or {}).items()},
     )
 
 

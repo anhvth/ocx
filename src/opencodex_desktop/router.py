@@ -112,6 +112,11 @@ class Router:
             from .discovery import save_routes
             save_routes(d.routes)
             write_catalog(build_catalog(d))
+            from .pi_setup import apply_pi_config
+            try:
+                await asyncio.to_thread(apply_pi_config, self.cfg, d)
+            except Exception as e:
+                _log(f"Pi model sync failed: {e!r}")
             self.routes = new
 
     def session(self, url: str) -> aiohttp.ClientSession:
@@ -336,6 +341,24 @@ class Router:
         sub = tail[3:] if tail.startswith("v1/") else tail
         url = f"{auth.upstream}/{sub}" + (f"?{req.query_string}" if req.query_string else "")
         headers = {k: v for k, v in req.headers.items() if k.lower() not in HOP}
+        # Gateway clients present the local token, not an OpenAI credential.
+        gateway = (_same(req.headers.get("authorization"), f"Bearer {self.token}")
+                   or _same(req.headers.get("x-opencodex-token"), self.token))
+        if gateway:
+            headers = {k: v for k, v in headers.items()
+                       if k.lower() not in ("authorization", "x-opencodex-token", "x-api-key", "chatgpt-account-id")}
+            if sub == "responses" and auth.mode == "chatgpt" and raw:
+                try:
+                    body = json.loads(raw)
+                except ValueError:
+                    return _error(400, "invalid JSON")
+                if not isinstance(body, dict):
+                    return _error(400, "expected a JSON object")
+                body.setdefault("instructions", "")
+                body["store"] = False
+                body["stream"] = True
+                body.pop("max_output_tokens", None)
+                raw = json.dumps(body).encode()
         lower = {k.lower() for k in headers}
         if "authorization" not in lower:
             headers["Authorization"] = f"Bearer {auth.access_token or auth.api_key}"

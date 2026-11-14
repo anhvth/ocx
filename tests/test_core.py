@@ -430,3 +430,23 @@ def test_fold_system_messages():
     assert [m["role"] for m in out] == ["user", "assistant", "user"]
     assert "first" in out[0]["content"][0]["text"] and out[0]["content"][1]["text"] == "hi"
     assert out[2]["content"][0]["type"] == "tool_result" and "tools changed" in out[2]["content"][1]["text"]
+
+
+def test_context_caps(tmp_path, monkeypatch):
+    from opencodex_desktop import discovery
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    home = tmp_path / "codex"
+    home.mkdir()
+    (home / "auth.json").write_text("{}")
+    (home / "models_cache.json").write_text(json.dumps({"models": [
+        {"slug": "gpt-a", "context_window": 500000, "auto_compact_token_limit": 450000},
+        {"slug": "gpt-b", "context_window": 272000},
+        {"slug": "gpt-c", "context_window": 128000},
+        {"slug": "gpt-skip", "context_window": 500000}]}))
+    p = tmp_path / "c.yaml"
+    p.write_text(f"codex_home: [{home}]\nmax_context_window: 300000\n"
+                 "openai:\n  include: [gpt-a, gpt-b, gpt-c]\n  context_window: {gpt-b: 256000}\n")
+    cfg = config.load(p)
+    ms = discovery._openai_models(cfg, OpenAIAuth(mode="chatgpt"))
+    assert [(m["slug"], m["context_window"]) for m in ms] == [("gpt-a", 300000), ("gpt-b", 256000), ("gpt-c", 128000)]
+    assert ms[0]["max_context_window"] == 300000 and ms[0]["auto_compact_token_limit"] == 270000

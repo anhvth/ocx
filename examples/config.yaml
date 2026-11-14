@@ -18,6 +18,10 @@ listen: 127.0.0.1:11111
 openai:
   enabled: true
   # include: [gpt-5.5, gpt-5.5-codex]   # optional allow-list
+  # context_window: {gpt-5.5: 256000}    # optional per-model cap
+
+# Optional cap on every model's context window (GPT and custom).
+# max_context_window: 300000
 
 # Model selected in Codex after start (optional). Format: <provider>/<model> or a GPT slug.
 # default_model: alibaba/qwen4-max-preview

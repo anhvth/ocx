@@ -132,6 +132,12 @@ def _openai_models(cfg: Config, auth: OpenAIAuth) -> list[dict[str, Any]]:
     models = [m for m in models if m.get("visibility", "list") == "list" and m.get("slug") and "/" not in m["slug"]]
     if cfg.openai_include:
         models = [m for m in models if m["slug"] in cfg.openai_include]
+    for m in models:
+        cap = min([c for c in (cfg.openai_context.get(m["slug"]), cfg.max_context_window) if c] or [0])
+        if cap and cap < (m.get("context_window") or cap + 1):
+            m["context_window"] = m["max_context_window"] = cap
+            if m.get("auto_compact_token_limit"):
+                m["auto_compact_token_limit"] = min(m["auto_compact_token_limit"], int(cap * 0.9))
     return models
 
 
@@ -285,6 +291,13 @@ def discover(cfg: Config) -> Discovery:
         r, ok = _discover_provider(p)
         routes += r
         errors += 0 if ok else 1
+    cap = cfg.max_context_window
+    capped = [r.slug for r in routes if cap and r.context_window > cap]
+    for r in routes:
+        if r.slug in capped:
+            r.context_window, r.context_source = cap, f"{r.context_source}, capped"
+    if capped:
+        ui.info(f"max_context_window {ui.fmt_tokens(cap)}: capped {len(capped)} model(s)")
     return Discovery(openai=auth, openai_models=openai_models, routes=routes, errors=errors)
 
 
