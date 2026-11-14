@@ -34,7 +34,8 @@ def _content_parts(content: Any) -> Any:
     return parts
 
 
-def to_chat(body: dict[str, Any]) -> tuple[dict[str, Any], set[str]]:
+def tools_for_chat(body: dict[str, Any]) -> tuple[list[dict[str, Any]], set[str]]:
+    """Responses tools -> Chat Completions tools; custom tools become single-string functions."""
     custom_tools: set[str] = set()
     tools: list[dict[str, Any]] = []
     for t in body.get("tools") or []:
@@ -50,6 +51,11 @@ def to_chat(body: dict[str, Any]) -> tuple[dict[str, Any], set[str]]:
                 "name": t["name"], "description": (t.get("description") or "") + hint,
                 "parameters": {"type": "object", "properties": {"input": {"type": "string", "description": "Raw tool input"}},
                                "required": ["input"]}}})
+    return tools, custom_tools
+
+
+def to_chat(body: dict[str, Any]) -> tuple[dict[str, Any], set[str]]:
+    tools, custom_tools = tools_for_chat(body)
 
     messages: list[dict[str, Any]] = []
     if body.get("instructions"):

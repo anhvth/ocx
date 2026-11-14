@@ -1,8 +1,7 @@
 # opencodex-desktop
 
 Use **Qwen (Alibaba), local vLLM, or any OpenAI-compatible model** in the **Codex Desktop app** and the
-`codex` CLI, side by side with your normal ChatGPT models (fast mode included). There is one YAML file
-and one command.
+`codex` CLI, side by side with your normal ChatGPT models (fast mode included). One YAML file, one command.
 
 ```
 Codex app / codex CLI ──► opencodex-desktop router (127.0.0.1:11111)
@@ -11,24 +10,30 @@ Codex app / codex CLI ──► opencodex-desktop router (127.0.0.1:11111)
                               └─ local-vllm/…     ──► http://127.0.0.1:7788/v1
 ```
 
+Requirements: the Codex Desktop app or `codex` CLI, Python 3.10+, and [uv](https://docs.astral.sh/uv/).
+A ChatGPT sign-in (`codex login` or the app) is only needed for the GPT models.
+
 ## Quick start
 
 ```bash
-# 1. ChatGPT models only: works with no config if you are signed in to Codex (app or `codex login`)
-uvx --from git+https://github.com/anhvth/opencodex-desktop opencodex-desktop start
+uv tool install git+https://github.com/anhvth/opencodex-desktop   # once
+
+# 1. ChatGPT models only: works with no config if you are signed in to Codex
+opencodex-desktop start
 
 # 2. Add other models: write the config, edit it, start again
-uvx --from git+https://github.com/anhvth/opencodex-desktop opencodex-desktop init
+opencodex-desktop init
 $EDITOR ~/.config/opencodex-desktop/config.yaml
-uvx --from git+https://github.com/anhvth/opencodex-desktop opencodex-desktop start
+opencodex-desktop start
 
 # 3. Back to plain Codex at any time
-uvx --from git+https://github.com/anhvth/opencodex-desktop opencodex-desktop off
+opencodex-desktop off
 ```
 
 Then restart the Codex app (or open a new `codex` session) and pick a model.
 
-Tip: `uv tool install git+https://github.com/anhvth/opencodex-desktop` gives you a plain `opencodex-desktop` command.
+No install? Run any command as
+`uvx --from git+https://github.com/anhvth/opencodex-desktop opencodex-desktop <command>`.
 
 ## Commands
 
@@ -38,10 +43,11 @@ Tip: `uv tool install git+https://github.com/anhvth/opencodex-desktop` gives you
 | `off` | stops the router and removes its settings from `config.toml`, putting Codex back to its defaults |
 | `status` | shows the login, the router, what Codex points at, and the routed models with their context windows |
 | `stop` | stops only the router (Codex stays pointed at it) |
-| `init` | writes an example config to `~/.config/opencodex-desktop/config.yaml` |
+| `init` | writes an example config (`--force` overwrites an existing one) |
 | `serve` | runs the router in the foreground (for debugging / systemd) |
 
 Run `start` again after any change (new model, new key, new machine). It is idempotent.
+Use `--config PATH` or `$OPENCODEX_DESKTOP_CONFIG` to point at a different YAML.
 
 ## Config (`~/.config/opencodex-desktop/config.yaml`)
 
@@ -63,7 +69,12 @@ providers:
     models: auto                # everything the server lists
 ```
 
-See [`examples/config.yaml`](examples/config.yaml) for all fields.
+Also supported (see [`examples/config.yaml`](examples/config.yaml) for all fields):
+
+- `openai.include` — allow-list of GPT slugs to expose.
+- Per provider: `enabled`, `headers`, `wire_api` (`responses`/`chat`, auto-detected if omitted),
+  and `include` — substring filters when `models: auto`.
+- Per model: `display_name`, `reasoning_efforts`, `default_effort`, `input_modalities`.
 
 ### What `start` checks
 
@@ -104,6 +115,20 @@ API keys are read when needed and never written into Codex's config or the state
 
 A remote Desktop chat runs its own `codex app-server` on the remote host, so run `opencodex-desktop start`
 **on that host** too (with its own config, e.g. `models: auto` against a local vLLM).
+
+## Troubleshooting
+
+- **Model missing from the picker** — read the `start` output: unreachable providers, bad keys and
+  unserved models are dropped with a ✗ line. If a provider was down during `start`, run `start` again
+  once it is back.
+- **What is happening** — `opencodex-desktop status`; the log is `~/.local/state/opencodex-desktop/router.log`.
+- **Port already in use** — `start` refuses; set a different `listen:` address.
+- **Tiny context windows** — below ~32k Codex cannot run (its prompt and tools take ~20k).
+- **Old custom-model threads after `off`** — a Desktop chat stays bound to its model's provider, so
+  those threads will not continue; start a new chat.
+
+The repo also ships an agent skill ([`skills/opencodex-desktop/`](skills/opencodex-desktop/SKILL.md))
+that teaches coding agents to set up, verify and debug this tool.
 
 ## License
 

@@ -26,6 +26,7 @@ CHATGPT_BASE = "https://chatgpt.com/backend-api/codex"
 OPENAI_API_BASE = "https://api.openai.com/v1"
 CONTEXT_KEYS = ("context_window", "max_model_len", "context_length", "max_context_length",
                 "max_input_tokens", "n_ctx", "n_ctx_train")
+MIN_CONTEXT = 32_000  # Codex's system prompt + tool schemas alone take ~20k tokens
 
 
 @dataclass
@@ -178,18 +179,18 @@ def _discover_provider(p: ProviderCfg) -> tuple[list[Route], bool]:
     try:
         status, data = http_json("GET", f"{p.base_url}/models", headers=headers, timeout=10)
     except (urllib.error.URLError, OSError, TimeoutError) as e:
-        ui.err(f"unreachable: {getattr(e, 'reason', e)} -> all {p.name} models dropped")
+        ui.warn(f"unreachable ({getattr(e, 'reason', e)}): {p.name} models not listed")
         return [], False
     served: dict[str, dict[str, Any]] | None = None
     if status in (401, 403):
-        ui.err(f"authentication failed (HTTP {status}); check the api key ({p.api_key_source}) -> dropped")
+        ui.warn(f"authentication failed (HTTP {status}); check the api key ({p.api_key_source}): {p.name} models not listed")
         return [], False
     if status == 200 and isinstance(data, dict) and isinstance(data.get("data"), list):
         served = {str(m.get("id")): m for m in data["data"] if m.get("id")}
     elif status == 404:
         ui.warn("provider has no /models endpoint; trusting the configured model list")
     else:
-        ui.err(f"/models returned HTTP {status}: {str(data)[:200]} -> dropped")
+        ui.warn(f"/models returned HTTP {status} ({str(data)[:200]}): {p.name} models not listed")
         return [], False
 
     if p.models_auto:
@@ -204,7 +205,7 @@ def _discover_provider(p: ProviderCfg) -> tuple[list[Route], bool]:
     routes: list[Route] = []
     for m in wanted:
         if served is not None and m.id not in served:
-            ui.warn(f"{m.id}: not served by the provider -> dropped")
+            ui.warn(f"{m.id}: not served by the provider; not listed")
             continue
         listed = _context_from(served.get(m.id, {})) if served else None
         if m.context_window:
@@ -217,10 +218,13 @@ def _discover_provider(p: ProviderCfg) -> tuple[list[Route], bool]:
         else:
             ctx, src = DEFAULT_CONTEXT, "default"
             ui.warn(f"{m.id}: context window unknown; using {ui.fmt_tokens(ctx)} (set context_window in the config)")
+        if ctx < MIN_CONTEXT:
+            ui.warn(f"{m.id}: context {ui.fmt_tokens(ctx)} is below the ~{ui.fmt_tokens(MIN_CONTEXT)} Codex needs for its own prompt; not listed")
+            continue
         try:
             wire = _detect_wire(p, m.id, headers)
         except (urllib.error.URLError, OSError, TimeoutError) as e:
-            ui.err(f"{m.id}: probe failed ({e}) -> dropped")
+            ui.warn(f"{m.id}: probe failed ({e}); not listed")
             continue
         efforts = m.reasoning_efforts or list(DEFAULT_EFFORTS)
         default = m.default_effort or ("medium" if "medium" in efforts else efforts[-1])
@@ -230,8 +234,6 @@ def _discover_provider(p: ProviderCfg) -> tuple[list[Route], bool]:
             efforts=efforts, default_effort=default, display_name=m.display_name,
             input_modalities=m.input_modalities or ["text"],
         ))
-        if ctx < 32_000:
-            ui.warn(f"{m.id}: context {ui.fmt_tokens(ctx)} is smaller than Codex's own prompt+tools (~20k); it will not work as an agent")
         ui.ok(f"{p.name}/{m.id}  ctx {ui.fmt_tokens(ctx)} ({src})  wire {wire}")
     return routes, True
 

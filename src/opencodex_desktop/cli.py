@@ -128,7 +128,7 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
 
     ui.head("Done")
     if d.errors:
-        ui.warn(f"{d.errors} provider(s) had problems (see ✗ above); their models are not offered")
+        ui.warn(f"{d.errors} provider(s) unavailable (see ⚠ above); their models are not listed in Codex")
     ui.info("Restart the Codex app (or start a new `codex` session) to pick up the model list.")
     ui.info("Turn it off any time with: opencodex-desktop off")
     return 0
