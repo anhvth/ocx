@@ -25,6 +25,7 @@ from typing import Any
 from . import tunnel, ui
 from .config import Config, router_token
 from .discovery import Discovery
+from .local_settings import managed_local_link
 
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
 SETTINGS = CLAUDE_HOME / "settings.json"
@@ -59,7 +60,9 @@ def _read(path: Path) -> dict[str, Any]:
 
 
 def _write(path: Path, data: dict[str, Any]) -> None:
-    """Atomic, owner-only (the file carries the router token). Replaces a symlink with a real file."""
+    """Write owner-only settings, preserving links to private local targets."""
+    if managed_local_link(path):
+        path = path.resolve()
     tmp = path.with_name(f".{path.name}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
@@ -125,7 +128,7 @@ def apply_claude_config(cfg: Config, d: Discovery) -> None:
     small = [r["slug"] for r in rows if r["ctx"] and r["ctx"] < 200_000]
     if small:
         ui.warn(f"Claude Code assumes a 200k window for {', '.join(small)}; long sessions may overflow them")
-    if json.dumps(s, sort_keys=True) != before or SETTINGS.is_symlink():
+    if json.dumps(s, sort_keys=True) != before or (SETTINGS.is_symlink() and not managed_local_link(SETTINGS)):
         b = _backup(SETTINGS)
         _write(SETTINGS, s)
         ui.ok(f"updated {SETTINGS} ({len(rows)} models in /model" + (f"; backup: {b.name}" if b else "") + ")")

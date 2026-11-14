@@ -10,6 +10,7 @@ from pathlib import Path
 from . import ui
 from .config import TOKEN_FILE, Config, ConfigError, router_token
 from .discovery import Discovery
+from .local_settings import managed_local_link
 
 PROVIDER = "opencodex-desktop"
 SETTINGS_KEYS = ("enabledModels", "defaultProvider", "defaultModel")
@@ -30,7 +31,7 @@ def _read(path: Path) -> dict:
 
 def _write(path: Path, data: dict) -> None:
     # Preserve managed links while keeping generated settings at their local target.
-    if path.is_symlink():
+    if managed_local_link(path):
         path = path.resolve()
     text = json.dumps(data, indent=2) + "\n"
     if path.exists() and path.read_text() == text:

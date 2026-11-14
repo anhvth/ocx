@@ -99,7 +99,20 @@ def test_apply_and_restore(tmp_path, monkeypatch):
     assert "model_provider" not in doc and "model" not in doc and "model_providers" not in doc
 
 
+def test_claude_unmanaged_symlink_is_not_written(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOTFILES_DIR", str(tmp_path / "repo"))
+    target = tmp_path / "tracked.json"
+    target.write_text("{}\n")
+    link = tmp_path / "settings.json"
+    link.symlink_to(target)
+    claude_setup._write(link, {"env": {"secret": "local"}})
+    assert not link.is_symlink()
+    assert target.read_text() == "{}\n"
+    assert link.stat().st_mode & 0o777 == 0o600
+
+
 def test_claude_apply_and_restore(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOTFILES_DIR", str(tmp_path))
     monkeypatch.setattr(config, "TOKEN_FILE", tmp_path / "token")
     monkeypatch.setattr(claude_setup, "CLAUDE_HOME", tmp_path / "claude")
     monkeypatch.setattr(claude_setup, "SETTINGS", tmp_path / "claude" / "settings.json")
@@ -107,9 +120,10 @@ def test_claude_apply_and_restore(tmp_path, monkeypatch):
     for name in ("PIDFILE", "URLFILE", "LOGFILE"):
         monkeypatch.setattr(tunnel, name, tmp_path / name)
     (tmp_path / "claude").mkdir()
-    (tmp_path / "real.json").write_text(json.dumps({"theme": "dark", "env": {"FOO": "1"},
+    (tmp_path / "_local").mkdir()
+    (tmp_path / "_local" / "real.json").write_text(json.dumps({"theme": "dark", "env": {"FOO": "1"},
                                                     "modelPicker": {"options": [{"model": "mine"}]}}))
-    (tmp_path / "claude" / "settings.json").symlink_to(tmp_path / "real.json")
+    (tmp_path / "claude" / "settings.json").symlink_to(tmp_path / "_local" / "real.json")
     (tmp_path / "desktop" / "configLibrary").mkdir(parents=True)
     (tmp_path / "desktop" / "configLibrary" / "old.json").write_text("{}")
     (tmp_path / "desktop" / "configLibrary" / "_meta.json").write_text(json.dumps(
@@ -126,7 +140,7 @@ def test_claude_apply_and_restore(tmp_path, monkeypatch):
     for _ in range(2):  # idempotent
         claude_setup.apply_claude_config(cfg, d)
     path = tmp_path / "claude" / "settings.json"
-    assert not path.is_symlink() and path.stat().st_mode & 0o777 == 0o600
+    assert path.is_symlink() and path.stat().st_mode & 0o777 == 0o600
     s = json.loads(path.read_text())
     assert s["theme"] == "dark" and s["env"]["FOO"] == "1"
     assert s["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:11111"

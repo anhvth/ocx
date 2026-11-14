@@ -14,9 +14,11 @@ def test_pi_settings_symlink_survives_sync_and_restore(tmp_path, monkeypatch):
     home = tmp_path / "pi"
     home.mkdir()
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(home))
+    monkeypatch.setenv("DOTFILES_DIR", str(tmp_path))
     monkeypatch.setattr(config, "TOKEN_FILE", tmp_path / "token")
     monkeypatch.setattr(pi_setup, "TOKEN_FILE", tmp_path / "token")
-    target = tmp_path / "local-settings.json"
+    (tmp_path / "_local").mkdir()
+    target = tmp_path / "_local" / "settings.json"
     target.write_text('{"defaultModel": "gpt-test"}\n')
     link = home / "settings.json"
     link.symlink_to(target)
