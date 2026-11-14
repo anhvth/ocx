@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hmac
+import html
 import io
 import json
 import os
@@ -130,6 +131,21 @@ class Router:
         auth = read_openai_auth(self.cfg.codex_home)
         return web.json_response({"status": "ok", "service": "opencodex-desktop", "version": __version__,
                                   "pid": os.getpid(), "openai": auth.mode, "routes": sorted(self.routes)})
+
+    async def index(self, req: web.Request) -> web.Response:
+        """What a browser sees at the router's address: the /healthz facts, readable."""
+        if "cf-connecting-ip" in req.headers:
+            return web.Response(status=403)
+        auth = read_openai_auth(self.cfg.codex_home)
+        models = self.gpt_models() + sorted(self.routes)
+        rows = "".join(f"<li><code>{html.escape(m)}</code></li>" for m in models) or "<li>none</li>"
+        return web.Response(content_type="text/html", text=(
+            f"<!doctype html><meta charset=utf-8><title>opencodex-desktop</title>"
+            f"<body style='font:15px system-ui;max-width:40em;margin:2em auto;padding:0 1em'>"
+            f"<h1>opencodex-desktop {__version__}</h1><p>Router running. OpenAI login: <b>{html.escape(auth.mode)}</b>.</p>"
+            f"<h2>Models</h2><ul>{rows}</ul>"
+            f"<p>This address is for Codex, Claude Code, Pi and OpenClaude, not for a browser; API calls need the "
+            f"router token. Changes: edit the config and run <code>opencodex-desktop start</code>.</p>"))
 
     def authorized(self, req: web.Request, claude: bool) -> bool:
         h = req.headers
@@ -496,6 +512,8 @@ def build_app(cfg: Config) -> web.Application:
     app.on_startup.append(router.on_startup)
     app.on_cleanup.append(router.on_cleanup)
     app.router.add_get("/healthz", router.healthz)
+    app.router.add_get("/", router.index)
+    app.router.add_get("/favicon.ico", lambda _req: web.Response(status=204))
     app.router.add_route("*", "/{tail:.*}", router.handle)
     return app
 

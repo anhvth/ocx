@@ -332,6 +332,10 @@ def test_anthropic_end_to_end(tmp_path, monkeypatch):
             async with router_mod.aiohttp.ClientSession() as s:
                 async with s.post(f"http://127.0.0.1:{rport}/v1/responses", json=body) as resp:
                     assert resp.status == 401  # no router token
+                async with s.get(f"http://127.0.0.1:{rport}/") as resp:  # browser page, no token
+                    assert resp.status == 200 and "anthropic/claude-test" in await resp.text()
+                async with s.get(f"http://127.0.0.1:{rport}/", headers={"cf-connecting-ip": "1.2.3.4"}) as resp:
+                    assert resp.status == 403
                 async with s.post(f"http://127.0.0.1:{rport}/v1/responses", json=body, headers=tok) as resp:
                     assert resp.status == 200
                     text = await resp.text()
