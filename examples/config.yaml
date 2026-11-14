@@ -1,0 +1,39 @@
+# opencodex-desktop config: the ONE file for everything.
+# Location: ~/.config/opencodex-desktop/config.yaml  (or pass --config / $OPENCODEX_DESKTOP_CONFIG)
+# With no file at all, `opencodex-desktop start` serves just your ChatGPT models.
+
+# Where Codex keeps config.toml + auth.json. $CODEX_HOME wins; otherwise the first
+# existing entry below; otherwise ~/.codex.
+codex_home: [~/.codex]
+
+# Router address Codex will talk to.
+listen: 127.0.0.1:11111
+
+# Your ChatGPT/OpenAI models come from the Codex login (codex login / Codex app sign-in).
+openai:
+  enabled: true
+  # include: [gpt-5.5, gpt-5.5-codex]   # optional allow-list
+
+# Model selected in Codex after start (optional). Format: <provider>/<model> or a GPT slug.
+# default_model: alibaba/qwen4-max-preview
+
+# Any OpenAI-compatible endpoint. Models that are unreachable or not served are dropped.
+# Context window: value here, else what the provider's /models reports, else 128k (with a warning).
+providers:
+  alibaba:
+    base_url: https://token-plan.maas.qwencloudapi.com/compatible-mode/v1
+    api_key_file: ~/.config/claude-alibaba/token   # or api_key_env: DASHSCOPE_API_KEY, or api_key: sk-...
+    # wire_api: responses                          # auto-detected (responses vs chat) if omitted
+    models:
+      - qwen4-max-preview:
+          context_window: 1000000
+          max_output_tokens: 393216
+      - qwen3.8-max:
+          context_window: 1000000
+          max_output_tokens: 131072
+
+  local-vllm:
+    enabled: false              # flip to true on a machine that runs vLLM
+    base_url: http://127.0.0.1:7788/v1
+    models: auto                # every served model; vLLM reports max_model_len itself
+    # include: [DeepSeek]       # substring filter for `auto`
