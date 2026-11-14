@@ -127,7 +127,8 @@ def _openai_models(cfg: Config, auth: OpenAIAuth) -> list[dict[str, Any]]:
             "authorization": f"Bearer {auth.access_token}", "chatgpt-account-id": auth.account_id or ""})
         if status == 200 and isinstance(data, dict):
             models = data.get("models") or []
-    models = [m for m in models if m.get("visibility", "list") == "list" and m.get("slug")]
+    # Real OpenAI slugs never contain "/"; such entries were cached from another gateway's catalog.
+    models = [m for m in models if m.get("visibility", "list") == "list" and m.get("slug") and "/" not in m["slug"]]
     if cfg.openai_include:
         models = [m for m in models if m["slug"] in cfg.openai_include]
     return models
