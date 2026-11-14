@@ -21,6 +21,21 @@ Every non-OpenAI model Codex sees is named `<provider>/<model-id>`:
   unknown `x/<model-id>` to the single route serving `<model-id>` (`resolve_alias`); keep that working.
   Don't add per-name alias tables.
 
+## Router endpoints (one address, two API formats)
+
+`http://127.0.0.1:11111`; every call needs the router token (`~/.local/state/opencodex-desktop/token`)
+as `x-opencodex-token`, `x-api-key` or `Authorization: Bearer` (Codex may send its own login instead).
+
+- OpenAI Responses (Codex, Pi): `POST /v1/responses`, `/v1/responses/compact`; other paths pass
+  through to OpenAI. `/v1/chat/completions` is not translated for GPT.
+- Anthropic Messages (Claude Code, Claude app, OpenClaude `--provider custom-anthropic`): base URL
+  without `/v1`; `POST /v1/messages`, `/v1/messages/count_tokens`, `GET /v1/models` with
+  `anthropic-version`. `claude-*` -> api.anthropic.com (Claude Code's own login, others need an API
+  key); `gpt-*` -> translated to Responses; `<provider>/*` -> that provider's `anthropic_url`
+  (local vLLM defaults to its own `/v1/messages`; providers without one are not listed).
+- No token: `GET /` status page, `/healthz`, `HEAD` probes. Through the tunnel only the Claude
+  endpoints with the token work.
+
 ## Things that are easy to get wrong
 
 - Codex only reads `$CODEX_HOME/config.toml` (the Desktop app-server takes no `--profile`) and reads
