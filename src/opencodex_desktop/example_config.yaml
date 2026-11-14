@@ -33,6 +33,8 @@ providers:
     base_url: https://token-plan.maas.qwencloudapi.com/compatible-mode/v1
     api_key_file: ~/.config/claude-alibaba/token   # or api_key_env: DASHSCOPE_API_KEY, or api_key: sk-...
     # wire_api: responses                          # auto-detected (responses vs chat) if omitted
+    # Anthropic Messages endpoint: makes these models usable from Claude Code and the Claude app too.
+    anthropic_url: https://token-plan.maas.qwencloudapi.com/apps/anthropic/v1
     models:
       - qwen4-max-preview:
           context_window: 1000000
@@ -46,3 +48,4 @@ providers:
     base_url: http://127.0.0.1:7788/v1
     models: auto                # every served model; vLLM reports max_model_len itself
     # include: [DeepSeek]       # substring filter for `auto`
+    # Claude clients use vLLM's own /v1/messages (anthropic_url defaults to base_url for local hosts).

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import tomlkit
 
-from opencodex_desktop import codex_setup, config
+from opencodex_desktop import claude_setup, codex_setup, config
 from opencodex_desktop.anthropic_adapter import from_messages, to_messages
 from opencodex_desktop.discovery import Discovery, OpenAIAuth, Route, provider_headers
 from opencodex_desktop.transforms import decode_summary, encode_summary, sanitize_request
@@ -85,6 +85,54 @@ def test_apply_and_restore(tmp_path, monkeypatch):
     codex_setup.restore_codex_config(cfg, {"alibaba/qwen"})
     doc = tomlkit.parse((home / "config.toml").read_text())
     assert "model_provider" not in doc and "model" not in doc and "model_providers" not in doc
+
+
+def test_claude_apply_and_restore(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "TOKEN_FILE", tmp_path / "token")
+    monkeypatch.setattr(claude_setup, "CLAUDE_HOME", tmp_path / "claude")
+    monkeypatch.setattr(claude_setup, "SETTINGS", tmp_path / "claude" / "settings.json")
+    monkeypatch.setattr(claude_setup, "DESKTOP", tmp_path / "desktop")
+    (tmp_path / "claude").mkdir()
+    (tmp_path / "real.json").write_text(json.dumps({"theme": "dark", "env": {"FOO": "1"},
+                                                    "modelPicker": {"options": [{"model": "mine"}]}}))
+    (tmp_path / "claude" / "settings.json").symlink_to(tmp_path / "real.json")
+    (tmp_path / "desktop" / "configLibrary").mkdir(parents=True)
+    (tmp_path / "desktop" / "configLibrary" / "old.json").write_text("{}")
+    (tmp_path / "desktop" / "configLibrary" / "_meta.json").write_text(json.dumps(
+        {"appliedId": "old", "entries": [{"id": "old", "name": "Old"}]}))
+    other = config.ProviderCfg(name="other", base_url="http://y/v1")
+    cfg = config.Config(path=None, codex_home=tmp_path, listen_host="127.0.0.1", listen_port=11111,
+                        provider_id="opencodex-desktop", openai_enabled=True, openai_include=[], default_model=None,
+                        providers=[config.ProviderCfg(name="alibaba", base_url="http://x/v1", anthropic_url="http://x/a"),
+                                   other])
+    other_route = Route(slug="other/m", provider="other", upstream_model="m", base_url="http://y/v1",
+                        wire="chat", context_window=100_000, context_source="config")
+    d = Discovery(openai=OpenAIAuth(mode="chatgpt"), openai_models=[{"slug": "gpt-x", "context_window": 272_000}],
+                  routes=[ROUTE, other_route])
+    for _ in range(2):  # idempotent
+        claude_setup.apply_claude_config(cfg, d)
+    path = tmp_path / "claude" / "settings.json"
+    assert not path.is_symlink() and path.stat().st_mode & 0o777 == 0o600
+    s = json.loads(path.read_text())
+    assert s["theme"] == "dark" and s["env"]["FOO"] == "1"
+    assert s["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:11111"
+    assert s["env"]["ANTHROPIC_CUSTOM_HEADERS"] == f"x-opencodex-token: {config.router_token()}"
+    assert [o["model"] for o in s["modelPicker"]["options"]] == ["mine", "gpt-x", "alibaba/qwen[1m]"]
+    assert s["modelSettings"]["gpt-x"]["autoCompactWindow"] == 244_800
+    lib = tmp_path / "desktop" / "configLibrary"
+    meta = json.loads((lib / "_meta.json").read_text())
+    assert meta["appliedId"] == claude_setup.PROFILE_ID and meta["previousAppliedId"] == "old"
+    prof = json.loads((lib / f"{claude_setup.PROFILE_ID}.json").read_text())
+    names = [m["name"] for m in prof["inferenceModels"]]
+    assert names[0].startswith("claude-") and names[-2:] == ["gpt-x", "alibaba/qwen"]
+    assert prof["inferenceGatewayApiKey"] == config.router_token()
+
+    claude_setup.restore_claude_config(cfg)
+    assert json.loads(path.read_text()) == {"theme": "dark", "env": {"FOO": "1"},
+                                            "modelPicker": {"options": [{"model": "mine"}]}}
+    meta = json.loads((lib / "_meta.json").read_text())
+    assert meta == {"appliedId": "old", "entries": [{"id": "old", "name": "Old"}]}
+    assert not (lib / f"{claude_setup.PROFILE_ID}.json").exists()
 
 
 def test_custom_catalog_entry_keeps_instructions():
@@ -242,7 +290,9 @@ def test_anthropic_end_to_end(tmp_path, monkeypatch):
     port = srv.server_address[1]
     try:
         monkeypatch.setattr(discovery, "STATE_DIR", tmp_path)
+        monkeypatch.setattr(config, "TOKEN_FILE", tmp_path / "token")
         monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))  # no Codex login -> no network for GPT models
+        tok = {"x-opencodex-token": config.router_token()}
         p = tmp_path / "c.yaml"
         p.write_text(f"anthropic:\n  api_key: sk-ant-test\n  base_url: http://127.0.0.1:{port}/v1\n")
         cfg = config.load(p)
@@ -267,10 +317,26 @@ def test_anthropic_end_to_end(tmp_path, monkeypatch):
                     "tools": [{"type": "function", "name": "shell", "parameters": {"type": "object", "properties": {}}}]}
             async with router_mod.aiohttp.ClientSession() as s:
                 async with s.post(f"http://127.0.0.1:{rport}/v1/responses", json=body) as resp:
+                    assert resp.status == 401  # no router token
+                async with s.post(f"http://127.0.0.1:{rport}/v1/responses", json=body, headers=tok) as resp:
                     assert resp.status == 200
                     text = await resp.text()
                 # compaction through the same adapter
-                async with s.post(f"http://127.0.0.1:{rport}/v1/responses/compact", json=body) as resp:
+                # Claude client (Anthropic Messages) asking for the same model: native passthrough
+                mbody = {"model": "anthropic/claude-test", "max_tokens": 50,
+                         "messages": [{"role": "user", "content": "hi"}]}
+                async with s.post(f"http://127.0.0.1:{rport}/v1/messages", json=mbody,
+                                  headers={"anthropic-version": "2023-06-01"}) as resp:
+                    assert resp.status == 401
+                async with s.post(f"http://127.0.0.1:{rport}/v1/messages", json=mbody,
+                                  headers={"anthropic-version": "2023-06-01", "x-api-key": tok["x-opencodex-token"]}) as resp:
+                    assert resp.status == 200, await resp.text()
+                    assert seen["payloads"][-1]["model"] == "claude-test"
+                async with s.get(f"http://127.0.0.1:{rport}/v1/models",
+                                 headers={"anthropic-version": "2023-06-01", **tok}) as resp:
+                    ids = [m["id"] for m in (await resp.json())["data"]]
+                    assert "anthropic/claude-test" in ids and "claude-opus-5-5" in ids
+                async with s.post(f"http://127.0.0.1:{rport}/v1/responses/compact", json=body, headers=tok) as resp:
                     assert resp.status == 200
                     compact = await resp.json()
             await runner.cleanup()
@@ -299,3 +365,54 @@ def test_codex_internal_items_become_text():
     assert [i.get("type") for i in inp] == ["message", "message"]
     assert inp[1]["role"] == "user" and "subtask done" in inp[1]["content"][0]["text"]
     assert "worker-1" in inp[1]["content"][0]["text"]
+
+
+def test_messages_to_responses_and_back():
+    from opencodex_desktop.messages_adapter import Translator, to_responses
+    body = {"model": "gpt-x", "system": [{"type": "text", "text": "be brief"}], "stream": True,
+            "thinking": {"type": "enabled", "budget_tokens": 20000},
+            "tools": [{"name": "Bash", "description": "run", "input_schema": {"type": "object"}},
+                      {"type": "web_search_20250305", "name": "web_search"}],
+            "messages": [{"role": "user", "content": "list files"},
+                         {"role": "assistant", "content": [{"type": "thinking", "thinking": "hm", "signature": "s"},
+                                                           {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"cmd": "ls"}}]},
+                         {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1",
+                                                       "content": [{"type": "text", "text": "a.txt"}]}]}]}
+    r = to_responses(body, "gpt-x")
+    assert r["instructions"] == "be brief" and r["reasoning"] == {"effort": "high"} and r["store"] is False
+    assert [t["name"] for t in r["tools"]] == ["Bash"]  # server tools have no input_schema
+    assert [i.get("type", "message") for i in r["input"]] == ["message", "function_call", "function_call_output"]
+    assert r["input"][1]["arguments"] == '{"cmd": "ls"}' and r["input"][2]["output"] == "a.txt"
+
+    tr = Translator("gpt-x")
+    out = tr.start()
+    for ev in [{"type": "response.output_text.delta", "output_index": 0, "delta": "Hel"},
+               {"type": "response.output_text.delta", "output_index": 0, "delta": "lo"},
+               {"type": "response.output_item.done", "output_index": 0},
+               {"type": "response.output_item.added", "output_index": 1,
+                "item": {"type": "function_call", "call_id": "c1", "name": "Bash"}},
+               {"type": "response.function_call_arguments.delta", "output_index": 1, "delta": '{"cmd":'},
+               {"type": "response.function_call_arguments.delta", "output_index": 1, "delta": '"pwd"}'},
+               {"type": "response.output_item.done", "output_index": 1},
+               {"type": "response.completed", "response": {"usage": {"input_tokens": 7, "output_tokens": 3}}}]:
+        out += tr.feed(ev)
+    out += tr.finish()
+    events = [line[7:] for line in out.decode().splitlines() if line.startswith("event: ")]
+    assert events == ["message_start", "content_block_start", "content_block_delta", "content_block_delta",
+                      "content_block_stop", "content_block_start", "content_block_delta", "content_block_delta",
+                      "content_block_stop", "message_delta", "message_stop"]
+    msg = tr.message()
+    assert msg["content"][0] == {"type": "text", "text": "Hello"}
+    assert msg["content"][1]["input"] == {"cmd": "pwd"} and msg["stop_reason"] == "tool_use"
+    assert msg["usage"] == {"input_tokens": 7, "output_tokens": 3}
+
+
+def test_fold_system_messages():
+    from opencodex_desktop.messages_adapter import fold_system_messages
+    msgs = [{"role": "system", "content": "first"}, {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "yo"}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t"}]},
+            {"role": "system", "content": [{"type": "text", "text": "tools changed"}]}]
+    out = fold_system_messages(msgs)
+    assert [m["role"] for m in out] == ["user", "assistant", "user"]
+    assert "first" in out[0]["content"][0]["text"] and out[0]["content"][1]["text"] == "hi"
+    assert out[2]["content"][0]["type"] == "tool_result" and "tools changed" in out[2]["content"][1]["text"]

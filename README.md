@@ -1,11 +1,13 @@
 # opencodex-desktop
 
 Use **Qwen (Alibaba), Claude (Anthropic), local vLLM, or any OpenAI-compatible model** in the **Codex
-Desktop app** and the `codex` CLI, side by side with your normal ChatGPT models (fast mode included).
+Desktop app** and the `codex` CLI, side by side with your normal ChatGPT models (fast mode included),
+and the same models (GPT included) in **Claude Code** and the **Claude desktop app**.
 One YAML file, one command.
 
 ```
-Codex app / codex CLI ──► opencodex-desktop router (127.0.0.1:11111)
+Codex app / codex CLI ──┐
+Claude Code / Claude app ┴► opencodex-desktop router (127.0.0.1:11111)
                               ├─ gpt-*            ──► ChatGPT (your existing Codex login, untouched)
                               ├─ alibaba/qwen…    ──► Alibaba Token Plan
                               ├─ anthropic/claude…──► Anthropic Messages API
@@ -119,10 +121,32 @@ extended-thinking budget (`low` 4k, `medium` 16k, `high` 32k tokens, capped to f
 | path | contents |
 |---|---|
 | `~/.config/opencodex-desktop/config.yaml` | your config (the only file you edit) |
-| `~/.local/state/opencodex-desktop/` | `router.log`, `router.pid`, `routes.json`, `model-catalog.json` |
+| `~/.local/state/opencodex-desktop/` | `router.log`, `router.pid`, `routes.json`, `model-catalog.json`, `token` |
+| `~/.claude/settings.json` | `env` (router URL + token header), `modelPicker.options`, `modelSettings`; backed up as `settings.json.bak-opencodex-desktop-*` |
+| `~/Library/Application Support/Claude-3p/configLibrary/` | the Claude app's `opencodex-desktop` gateway profile (macOS) |
 | `$CODEX_HOME/config.toml` | gets `model_provider`, `model_catalog_json`, `[model_providers.opencodex-desktop]`; backed up as `config.toml.bak-opencodex-desktop-*` before every change |
 
 API keys are read when needed and never written into Codex's config or the state dir.
+
+## Claude Code and the Claude desktop app
+
+`start` also writes `~/.claude/settings.json` (backed up first; `off` removes exactly what it added):
+`ANTHROPIC_BASE_URL` = the router, an `x-opencodex-token` header (the router's local token,
+`~/.local/state/opencodex-desktop/token`), `/model` rows for every GPT and routed model, and an
+`autoCompactWindow` per model. On macOS it adds a gateway profile `opencodex-desktop` to the Claude
+app (third-party mode) with the Claude, GPT and routed models; restart the app to load it.
+
+- `claude-*` requests go to api.anthropic.com with the client's own Claude login (Claude Code), or
+  this machine's Claude Code login (the Claude app's gateway profile). That token goes nowhere else.
+- GPT models use the Codex login; the router translates Messages ↔ Responses.
+- Routed models are sent to the provider's Anthropic Messages endpoint, set as `anthropic_url:`
+  (defaults to `base_url` for local endpoints such as vLLM). Providers without one are Codex-only.
+- Claude Code warns `unrecognized_model` for custom ids; harmless. 1M-context models get a `[1m]` suffix.
+- Claude app SSH sessions call the gateway from the remote host, and the app refuses a loopback
+  gateway for them, so this profile serves local sessions only. On a remote, run `start` there and
+  use `claude` in a terminal.
+
+Anthropic does not support non-Claude models behind Claude Code; treat that part as best effort.
 
 ## Remote machines (Codex Desktop over SSH)
 

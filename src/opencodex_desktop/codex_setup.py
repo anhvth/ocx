@@ -85,9 +85,12 @@ def build_catalog(d: Discovery) -> dict[str, Any]:
     return {"models": models}
 
 
+CATALOG = STATE_DIR / "model-catalog.json"
+
+
 def write_catalog(catalog: dict[str, Any]) -> Path:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    path = STATE_DIR / "model-catalog.json"
+    path = CATALOG
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(catalog, indent=2))
     tmp.replace(path)

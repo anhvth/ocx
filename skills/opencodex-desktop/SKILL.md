@@ -1,6 +1,6 @@
 ---
 name: opencodex-desktop
-description: Set up, change, debug or turn off custom models (Alibaba Qwen, Anthropic Claude, local vLLM, any OpenAI-compatible endpoint) in the Codex Desktop app and codex CLI next to ChatGPT models, using the opencodex-desktop tool (one YAML file + `opencodex-desktop start`). Use when the user wants Desktop/Codex to see or accept Qwen/Claude/vLLM/custom models, add a model or provider, fix context windows, set it up on a new machine or SSH remote, or go back to plain Codex; or when Desktop shows "Unknown model", "call_id is required for function_call_output", "missing both base_instructions", missing models in the picker, or a provider 400.
+description: Set up, change, debug or turn off custom models (Alibaba Qwen, Anthropic Claude, local vLLM, any OpenAI-compatible endpoint) in the Codex Desktop app and codex CLI next to ChatGPT models (and the same models, GPT included, in Claude Code and the Claude desktop app), using the opencodex-desktop tool (one YAML file + `opencodex-desktop start`). Use when the user wants Desktop/Codex to see or accept Qwen/Claude/vLLM/custom models, add a model or provider, fix context windows, set it up on a new machine or SSH remote, or go back to plain Codex; or when Desktop shows "Unknown model", "call_id is required for function_call_output", "missing both base_instructions", missing models in the picker, or a provider 400.
 ---
 
 # opencodex-desktop
@@ -31,7 +31,8 @@ Repo: https://github.com/anhvth/opencodex-desktop (source in `~/projects/opencod
 provider; key defaults to `$ANTHROPIC_API_KEY`, base_url to `https://api.anthropic.com/v1`),
 `default_model`,
 `providers.<name>.{base_url, api_key|api_key_env|api_key_file, models: auto|[...], include, wire_api,
-headers, enabled}` (`wire_api: responses|chat|anthropic`), per model `{context_window,
+headers, enabled, anthropic_url}` (`wire_api: responses|chat|anthropic`; `anthropic_url` = the
+provider's Anthropic Messages endpoint, needed for its models to show up in Claude clients), per model `{context_window,
 max_output_tokens, reasoning_efforts, default_effort, display_name, input_modalities}`.
 See `examples/config.yaml` in the repo.
 
@@ -42,6 +43,7 @@ See `examples/config.yaml` in the repo.
 | first setup / after any change | `opencodex-desktop start`, then the user restarts the Codex app |
 | add a model/provider | edit the YAML, `start` again |
 | add Claude models | set `$ANTHROPIC_API_KEY` (or `anthropic: {api_key_file: ...}`), `start` again; pick `anthropic/claude-*` |
+| same models in Claude Code (`claude`, `cl`) / Claude app | nothing extra: `start` writes `~/.claude/settings.json` + the app's gateway profile; add `anthropic_url:` to providers that have one |
 | fix a context window | set `context_window` on the model (vLLM reports it itself with `models: auto`) |
 | back to plain Codex | `opencodex-desktop off` (stops router, removes the 3 keys, resets a routed `model`) |
 | what is going on | `opencodex-desktop status`; log `~/.local/state/opencodex-desktop/router.log` |
@@ -89,5 +91,11 @@ config's model unless you pass `-m`.
 13. The `codex` TUI (and `cdx`) attaches to a long-lived app-server daemon that loaded the catalog when it
     started (can be days old). New models missing from `/model` → quit codex sessions, then
     `codex app-server daemon restart`. The picker shows ~8 rows; custom models are sorted first.
-14. Old slugs (e.g. `qwen-token-plan/qwen4-max-preview`) are matched by model name to the one route serving
+14. Claude clients: the router's Claude face is `/v1/messages` (+ `count_tokens`, and `/v1/models` with an
+    `anthropic-version` header), authenticated by the router token (`x-opencodex-token` /
+    `x-api-key` / Bearer). Claude Code sends `role: system` entries inside `messages`; they are folded
+    into the user turn for non-Anthropic providers (Alibaba answers "Request body format invalid"
+    otherwise). The Claude app refuses a loopback gateway for SSH sessions (the remote calls it), so
+    remote Claude app sessions are not served; use `claude` in a terminal on the remote.
+15. Old slugs (e.g. `qwen-token-plan/qwen4-max-preview`) are matched by model name to the one route serving
     that model; unknown `x/y` slugs get a 404 listing the available models.

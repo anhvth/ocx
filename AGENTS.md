@@ -35,6 +35,10 @@ Every non-OpenAI model Codex sees is named `<provider>/<model-id>`:
   (Alibaba) ignore them, but vLLM rejects the whole request ("N validation errors ... EasyInputMessageParam").
   `sanitize_input` keeps only standard Responses types and turns the rest into text; test new
   transforms against vLLM, not just Alibaba.
+- Claude face (`messages_adapter.py`, `claude_setup.py`, `claude_auth.py`): a Claude OAuth token
+  (client's, or this machine's Claude Code login) may only ever be sent to api.anthropic.com; never
+  forward it to another provider. Test Claude Code with `claude -p ... --settings <file>` pointing at an
+  isolated router port, never by editing the user's live `~/.claude/settings.json` by hand.
 - Never print or commit API keys; show at most the last 4 characters.
 
 ## Testing

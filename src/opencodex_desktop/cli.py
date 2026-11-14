@@ -95,6 +95,7 @@ def _spawn_router(cfg: Config) -> int:
 
 
 def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
+    from .claude_setup import apply_claude_config
     from .codex_setup import apply_codex_config, build_catalog, write_catalog
     from .discovery import discover, save_routes
 
@@ -116,6 +117,9 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     ui.ok(f"model catalog: {catalog} ({len(d.openai_models)} ChatGPT + {len(d.routes)} custom)")
     apply_codex_config(cfg, d, catalog)
 
+    ui.head("Claude")
+    apply_claude_config(cfg, d)
+
     ui.head("Router")
     if _stop_router(cfg, quiet=True):
         ui.info("stopped the previous router")
@@ -131,16 +135,19 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
         ui.warn(f"{d.errors} provider(s) unavailable (see ⚠ above); their models are not listed in Codex")
     ui.info("Restart the Codex app to pick up the model list. The codex CLI attaches to a background")
     ui.info("daemon that keeps its old list: `codex app-server daemon restart` (closes open codex sessions).")
+    ui.info("Claude Code (`claude`, `cl`) sees the new models in /model right away; restart the Claude app.")
     ui.info("Turn it off any time with: opencodex-desktop off")
     return 0
 
 
 def cmd_off(cfg: Config, args: argparse.Namespace) -> int:
+    from .claude_setup import restore_claude_config
     from .codex_setup import restore_codex_config
     from .discovery import load_routes
     ui.head("opencodex-desktop off")
     _stop_router(cfg)
     restore_codex_config(cfg, {r.slug for r in load_routes()})
+    restore_claude_config(cfg)
     return 0
 
 

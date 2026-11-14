@@ -50,6 +50,8 @@ class ProviderCfg:
     models: list[ModelCfg] = field(default_factory=list)
     headers: dict[str, str] = field(default_factory=dict)
     enabled: bool = True
+    # Native Anthropic Messages endpoint (".../v1"), used for Claude Code / Claude Desktop clients.
+    anthropic_url: str | None = None
 
 
 @dataclass
@@ -63,6 +65,11 @@ class Config:
     openai_include: list[str]
     default_model: str | None
     providers: list[ProviderCfg]
+
+    @property
+    def anthropic_base(self) -> str:
+        """ANTHROPIC_BASE_URL for Claude clients (they append /v1/messages)."""
+        return f"http://{self.listen_host}:{self.listen_port}"
 
     @property
     def base_url(self) -> str:
@@ -148,7 +155,20 @@ def _provider(name: str, pr: dict[str, Any]) -> ProviderCfg:
         models=[] if auto else [_model(m) for m in models_raw],
         headers={str(k): str(v) for k, v in (pr.get("headers") or {}).items()},
         enabled=pr.get("enabled", True) is not False,
+        anthropic_url=_anthropic_url(pr, wire),
     )
+
+
+def _anthropic_url(pr: dict[str, Any], wire: str | None) -> str | None:
+    """Where Claude clients' requests for this provider go. vLLM serves /v1/messages next to
+    /v1/chat/completions, so a local endpoint defaults to its base_url."""
+    if pr.get("anthropic_url"):
+        return str(pr["anthropic_url"]).rstrip("/")
+    base = str(pr["base_url"]).rstrip("/")
+    host = base.split("://", 1)[-1].split("/", 1)[0].rsplit(":", 1)[0]
+    if wire == "anthropic" or host in ("localhost", "127.0.0.1", "[::1]") or host.startswith("127."):
+        return base
+    return None
 
 
 def _anthropic_provider(raw: dict[str, Any], taken: set[str]) -> ProviderCfg | None:
@@ -201,3 +221,23 @@ def load(path: str | os.PathLike[str] | None = None) -> Config:
         default_model=raw.get("default_model"),
         providers=providers,
     )
+
+
+TOKEN_FILE = STATE_DIR / "token"
+
+
+def router_token() -> str:
+    """Per-machine secret every router client must present (other users on a shared host can't read it)."""
+    import secrets
+    try:
+        tok = TOKEN_FILE.read_text().strip()
+        if tok:
+            return tok
+    except OSError:
+        pass
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    tok = "ocd-" + secrets.token_urlsafe(32)
+    fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(tok + "\n")
+    return tok
