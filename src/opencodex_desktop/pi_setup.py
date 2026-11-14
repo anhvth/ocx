@@ -80,8 +80,9 @@ def apply_pi_config(cfg: Config, d: Discovery) -> None:
     providers[PROVIDER] = {"name": "opencodex-desktop", "baseUrl": cfg.base_url,
                            "api": "openai-responses", "apiKey": f"!cat {shlex.quote(str(TOKEN_FILE))}",
                            "models": rows}
-    settings["enabledModels"] = [f"{PROVIDER}/*"]
     slugs = [m["id"] for m in rows]
+    # exact ids: Pi's "*" does not match "/", so "opencodex-desktop/*" would hide alibaba/... models
+    settings["enabledModels"] = [f"{PROVIDER}/{s}" for s in slugs]
     current = settings.get("defaultModel")
     if current not in slugs:
         current = cfg.default_model if cfg.default_model in slugs else next(iter(slugs), None)

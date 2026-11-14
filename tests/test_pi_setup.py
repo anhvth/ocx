@@ -35,7 +35,7 @@ def test_pi_sync_restore(tmp_path, monkeypatch):
     assert [m["id"] for m in provider["models"]] == ["gpt-test", "vendor/model"]
     assert provider["models"][1]["maxTokens"] == 32000
     assert provider["models"][1]["thinkingLevelMap"]["high"] == "high"
-    assert json.loads((home / "settings.json").read_text())["enabledModels"] == ["opencodex-desktop/*"]
+    assert json.loads((home / "settings.json").read_text())["enabledModels"] == ["opencodex-desktop/gpt-test", "opencodex-desktop/vendor/model"]
     # Re-discovery replaces the managed list; unrelated edits survive off.
     pi_setup.apply_pi_config(cfg, Discovery(d.openai, d.openai_models, []))
     result = json.loads((home / "models.json").read_text())
