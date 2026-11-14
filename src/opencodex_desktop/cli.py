@@ -135,7 +135,7 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
         ui.warn(f"{d.errors} provider(s) unavailable (see ⚠ above); their models are not listed in Codex")
     ui.info("Restart the Codex app to pick up the model list. The codex CLI attaches to a background")
     ui.info("daemon that keeps its old list: `codex app-server daemon restart` (closes open codex sessions).")
-    ui.info("Claude Code (`claude`, `cl`) sees the new models in /model right away; restart the Claude app.")
+    ui.info("Claude Code (`claude`, `cl`) sees the new models in /model right away.")
     ui.info("Turn it off any time with: opencodex-desktop off")
     return 0
 

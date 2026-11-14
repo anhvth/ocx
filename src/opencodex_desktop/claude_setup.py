@@ -6,7 +6,8 @@ Claude Code: ~/.claude/settings.json gets
   modelPicker.options          one row per GPT / <provider>/<model> model, after the built-in Claude rows
   modelSettings.<model>        autoCompactWindow below the model's real context window
 Claude desktop app (macOS, third-party mode): a gateway profile in
-  ~/Library/Application Support/Claude-3p/configLibrary, made the applied profile.
+  ~/Library/Application Support/Claude-3p/configLibrary, made the applied profile (claude-* only with
+  an Anthropic API key: a Claude subscription login is for Claude Code, not for a gateway).
 `restore_claude_config` removes exactly what was added.
 """
 
@@ -155,7 +156,11 @@ def apply_desktop_config(cfg: Config, rows: list[dict[str, Any]]) -> None:
         return
     lib = DESKTOP / "configLibrary"
     lib.mkdir(exist_ok=True)
-    models: list[dict[str, Any]] = [{"name": m, "labelOverride": label} for m, label in CLAUDE_ROWS]
+    # claude-* need an Anthropic API key here: a Claude subscription login is for Claude Code only.
+    anth = next((p for p in cfg.providers if p.name == "anthropic" and p.api_key), None)
+    models: list[dict[str, Any]] = [{"name": m, "labelOverride": label} for m, label in CLAUDE_ROWS] if anth else []
+    if not anth:
+        ui.info("Claude app: no Anthropic API key, so the gateway profile lists no claude-* models")
     for r in rows:
         entry: dict[str, Any] = {"name": r["slug"], "labelOverride": r["label"]}
         if r["ctx"] >= ONE_M:
@@ -185,8 +190,8 @@ def apply_desktop_config(cfg: Config, rows: list[dict[str, Any]]) -> None:
     if mc.get("deploymentMode") != "3p":
         mc["deploymentMode"] = "3p"
         _write(main, mc)
-    ui.ok(f"Claude desktop app: gateway profile '{PROFILE_NAME}' ({len(models)} models)"
-          + ("; quit and reopen Claude to load it" if _desktop_running() else ""))
+    ui.ok(f"Claude desktop app: gateway profile '{PROFILE_NAME}' ({len(models)} models); "
+          + ("quit and reopen Claude to load it" if _desktop_running() else "loaded when Claude starts"))
 
 
 def restore_desktop_config() -> None:

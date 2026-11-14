@@ -29,7 +29,6 @@ from aiohttp import web
 from . import __version__, ui
 from .anthropic_adapter import from_messages, to_messages
 from .chat_adapter import from_chat, sse_events, to_chat
-from .claude_auth import access_token as claude_access_token
 from .config import ANTHROPIC_BASE, Config, router_token
 from .messages_adapter import Translator, fold_system_messages, to_responses
 from .discovery import _is_loopback, load_routes, provider_headers, read_openai_auth
@@ -38,7 +37,6 @@ from .transforms import (compact_v1_output, compaction_body, encode_summary, is_
 
 CLAUDE_MODELS = [("claude-opus-5-5", "Claude Opus 5.5"), ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
                  ("claude-haiku-5-5", "Claude Haiku 5.5"), ("claude-fable-5-1", "Claude Fable 5.1")]
-OAUTH_BETA = "oauth-2025-04-20"
 HOP = {"host", "content-length", "connection", "keep-alive", "transfer-encoding", "accept-encoding",
        "proxy-connection", "proxy-authorization", "upgrade", "te", "trailer", "content-encoding"}
 
@@ -232,23 +230,19 @@ class Router:
         api_hdr = headers.get(lower.get("x-api-key", ""), "")
         base = ANTHROPIC_BASE  # a client's own login only ever goes to api.anthropic.com
         if _same(auth_hdr, f"Bearer {self.token}") or _same(api_hdr, self.token) or not (auth_hdr or api_hdr):
-            # Desktop gateway mode authenticates with the router token: use this machine's Claude login
+            # Claude desktop app (gateway mode) authenticates with the router token. A Claude
+            # subscription login is only for Claude Code itself, so this needs an Anthropic API key.
+            anth = self.providers.get("anthropic")
+            if not (anth and anth.api_key):
+                return _aerror(401, "opencodex-desktop: claude-* through the gateway needs an Anthropic API key "
+                                    "(set ANTHROPIC_API_KEY or `anthropic: {api_key_file: ...}`, then start again)",
+                               "authentication_error")
             for k in ("authorization", "x-api-key"):
                 headers.pop(lower.get(k, k), None)
-            anth = self.providers.get("anthropic")
-            if anth and anth.api_key:
-                headers["x-api-key"] = anth.api_key
-                if "anthropic-version" not in lower:
-                    headers["anthropic-version"] = "2023-06-01"
-                base = anth.base_url
-            else:
-                tok = await asyncio.to_thread(claude_access_token)
-                if not tok:
-                    return _aerror(401, "opencodex-desktop: no Claude login on this machine (run `claude` and log in, "
-                                        "or set ANTHROPIC_API_KEY)", "authentication_error")
-                headers["Authorization"] = f"Bearer {tok}"
-                beta = headers.pop(lower.get("anthropic-beta", "anthropic-beta"), "")
-                headers["anthropic-beta"] = ",".join(x for x in [OAUTH_BETA, *beta.split(",")] if x and x.strip())
+            headers["x-api-key"] = anth.api_key
+            if "anthropic-version" not in lower:
+                headers["anthropic-version"] = "2023-06-01"
+            base = anth.base_url
         url = f"{base.rsplit('/v1', 1)[0]}/{tail}" + (f"?{req.query_string}" if req.query_string else "")
         return await self.stream(req, "POST", url, headers, json.dumps(body).encode(), label=f"claude {body['model']}")
 

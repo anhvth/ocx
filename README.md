@@ -136,8 +136,10 @@ API keys are read when needed and never written into Codex's config or the state
 `autoCompactWindow` per model. On macOS it adds a gateway profile `opencodex-desktop` to the Claude
 app (third-party mode) with the Claude, GPT and routed models; restart the app to load it.
 
-- `claude-*` requests go to api.anthropic.com with the client's own Claude login (Claude Code), or
-  this machine's Claude Code login (the Claude app's gateway profile). That token goes nowhere else.
+- `claude-*` from Claude Code go to api.anthropic.com unchanged, with Claude Code's own login (that
+  token goes nowhere else). The Claude app's gateway profile lists `claude-*` only when an Anthropic
+  API key is configured: a Claude subscription login is for Claude Code, and Anthropic rejects it
+  from a gateway (HTTP 429). Without a key, switch the app back to your Claude account for Claude models.
 - GPT models use the Codex login; the router translates Messages ↔ Responses.
 - Routed models are sent to the provider's Anthropic Messages endpoint, set as `anthropic_url:`
   (defaults to `base_url` for local endpoints such as vLLM). Providers without one are Codex-only.

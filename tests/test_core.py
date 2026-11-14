@@ -124,7 +124,7 @@ def test_claude_apply_and_restore(tmp_path, monkeypatch):
     assert meta["appliedId"] == claude_setup.PROFILE_ID and meta["previousAppliedId"] == "old"
     prof = json.loads((lib / f"{claude_setup.PROFILE_ID}.json").read_text())
     names = [m["name"] for m in prof["inferenceModels"]]
-    assert names[0].startswith("claude-") and names[-2:] == ["gpt-x", "alibaba/qwen"]
+    assert names == ["gpt-x", "alibaba/qwen"]  # no Anthropic API key: no claude-* rows
     assert prof["inferenceGatewayApiKey"] == config.router_token()
 
     claude_setup.restore_claude_config(cfg)
