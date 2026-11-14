@@ -17,6 +17,25 @@ Claude Code / Claude app ┴► opencodex-desktop router (127.0.0.1:11111)
 Requirements: the Codex Desktop app or `codex` CLI, Python 3.10+, and [uv](https://docs.astral.sh/uv/).
 A ChatGPT sign-in (`codex login` or the app) is only needed for the GPT models.
 
+## Development checks
+
+Install the Git hooks once per clone before committing:
+
+```bash
+uv sync --group dev
+uv run pre-commit install --install-hooks
+uv run pre-commit run --all-files
+uv run pytest -q
+```
+
+The commit hooks scan staged changes with Gitleaks, detect private keys, reject merge-conflict
+markers and oversized files, validate YAML/TOML, and fix trailing whitespace and missing final
+newlines. Hook versions are pinned to commit hashes. Keep credentials outside the checkout; common
+local secret files are also ignored by Git. Prefer `api_key_env` or `api_key_file` over inline keys.
+
+Hooks are local and can be bypassed; they do not guarantee that every secret will be detected or
+remove secrets from existing Git history. If a real credential was committed, revoke/rotate it first.
+
 ## Quick start
 
 ```bash

@@ -8,3 +8,32 @@ uv.lock
 .claude/
 *.token
 config.local.yaml
+
+# Editor, OS, and temporary artifacts.
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.tmp
+.Trash/
+.Trashes/
+
+# Local credentials and runtime state (examples remain trackable).
+.env
+.env.*
+!.env.example
+!.env.sample
+*.key
+*.pem
+*.p12
+*.pfx
+.secrets/
+auth.json
+credentials.json
+token
+routes.json

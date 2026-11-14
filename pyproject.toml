@@ -28,4 +28,7 @@ build-backend = "hatchling.build"
 packages = ["src/opencodex_desktop"]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pre-commit>=3.2",
+    "pytest>=8",
+]
