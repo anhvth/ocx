@@ -19,7 +19,7 @@ from typing import Any
 import aiohttp
 from aiohttp import web
 
-from . import __version__
+from . import __version__, ui
 from .anthropic_adapter import from_messages, to_messages
 from .chat_adapter import from_chat, sse_events, to_chat
 from .config import Config
@@ -32,7 +32,11 @@ HOP = {"host", "content-length", "connection", "keep-alive", "transfer-encoding"
 
 
 def _log(msg: str) -> None:
-    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}", flush=True)
+    if " -> " in msg and not msg.lstrip().startswith(("✓", "⚠", "✗")):
+        code = msg.rsplit(" -> ", 1)[1][:3]
+        msg = ("✓ " if code.startswith("2") else "✗ ") + msg
+    # router.log is meant for `tail -f`, so status lines are always colored there
+    print(ui.paint(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}"), flush=True)
 
 
 def _error(status: int, message: str, etype: str = "opencodex_desktop_error") -> web.Response:
@@ -108,13 +112,25 @@ class Router:
                 body = json.loads(raw)
             except ValueError:
                 body = None
+            if isinstance(body, dict) and "/" in str(body.get("model", "")) and body["model"] not in self.routes:
+                alias = self.resolve_alias(body["model"])
+                if alias:
+                    _log(f"{body['model']} => {alias} (matched by model name)")
+                    body["model"] = alias
+                else:
+                    return _error(404, f"opencodex-desktop: unknown or currently unreachable model {body['model']}. "
+                                       f"Available: {', '.join(sorted(self.routes)) or '(none)'}. "
+                                       "`opencodex-desktop status` shows what is up.", "model_not_found")
             if isinstance(body, dict) and body.get("model") in self.routes:
                 return await self.routed(req, tail, body)
-            if isinstance(body, dict) and "/" in str(body.get("model", "")):
-                return _error(503, f"opencodex-desktop: {body['model']} is not reachable right now (its provider "
-                                   "is down or no longer serves it); pick another model. `opencodex-desktop status` "
-                                   "shows what is up.", "model_unavailable")
         return await self.forward_openai(req, tail, raw)
+
+    def resolve_alias(self, slug: str) -> str | None:
+        """`old-provider/qwen4-max-preview` -> `alibaba/qwen4-max-preview` when exactly one route serves that model
+        (keeps old threads and `-m` habits working after a provider is renamed)."""
+        name = slug.split("/", 1)[1]
+        hits = [r.slug for r in self.routes.values() if r.upstream_model == name]
+        return hits[0] if len(hits) == 1 else None
 
     # ---------------------------------------------------------------- ChatGPT / OpenAI
     async def forward_openai(self, req: web.Request, tail: str, raw: bytes) -> web.StreamResponse:

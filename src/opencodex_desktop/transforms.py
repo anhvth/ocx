@@ -42,6 +42,9 @@ KEEP_TOOL_TYPES = {"function", "custom"}
 DROP_FIELDS = ("service_tier", "include", "prompt_cache_key", "client_metadata", "metadata",
                "previous_response_id", "background", "safety_identifier", "user", "prompt")
 COMPACTION_TYPES = {"compaction", "compaction_summary", "context_compaction"}
+# Input item types the OpenAI Responses API defines (a missing type means a message).
+STANDARD_TYPES = {None, "message", "function_call", "function_call_output", "custom_tool_call",
+                  "custom_tool_call_output", "local_shell_call", "local_shell_call_output"}
 
 
 def encode_summary(text: str) -> str:
@@ -98,9 +101,28 @@ def sanitize_input(items: list[Any]) -> list[Any]:
             label = item.get("name") or item.get("call_id") or "context"
             out.append(user_message(f"[{label}]\n{output_text(item.get('output'))}"))
             continue
+        if t not in STANDARD_TYPES:
+            # Codex-internal items (e.g. Desktop's `agent_message` between sub-agents). Strict servers
+            # such as vLLM reject the whole request on an unknown type, so pass the text along as a
+            # user message instead and drop items that carry no text.
+            text = _item_text(item)
+            if text:
+                who = item.get("author") or item.get("agent") or item.get("name") or item.get("sender")
+                out.append(user_message(f"[{t}{f' from {who}' if isinstance(who, str) else ''}]\n{text}"))
+            continue
         item = {k: v for k, v in item.items() if k != "id" and not k.startswith("internal_")}
         out.append(item)
     return out
+
+
+def _item_text(item: dict[str, Any]) -> str:
+    for key in ("content", "text", "message", "output", "summary"):
+        v = item.get(key)
+        if v:
+            t = output_text(v).strip()
+            if t:
+                return t
+    return ""
 
 
 def sanitize_request(body: dict[str, Any], route: Route) -> dict[str, Any]:

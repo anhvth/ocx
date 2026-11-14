@@ -86,3 +86,8 @@ config's model unless you pass `-m`.
 12. Claude thinking budgets are capped to `max_tokens - 1024`; if `max_output_tokens` is tiny,
     thinking is silently disabled. Forced tool use (`tool_choice: required`) is downgraded to auto
     while thinking is on (Anthropic rejects the combination).
+11. The `codex` TUI (and `cdx`) attaches to a long-lived app-server daemon that loaded the catalog when it
+    started (can be days old). New models missing from `/model` → quit codex sessions, then
+    `codex app-server daemon restart`. The picker shows ~8 rows; custom models are sorted first.
+12. Old slugs (e.g. `qwen-token-plan/qwen4-max-preview`) are matched by model name to the one route serving
+    that model; unknown `x/y` slugs get a 404 listing the available models.

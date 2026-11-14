@@ -78,8 +78,10 @@ def _custom_entry(template: dict[str, Any], r: Route, priority: int) -> dict[str
 def build_catalog(d: Discovery) -> dict[str, Any]:
     models = [copy.deepcopy(m) for m in d.openai_models]
     template = d.openai_models[0] if d.openai_models else FALLBACK_TEMPLATE
-    base_priority = max([m.get("priority", 0) for m in models] or [0]) + 1
-    models += [_custom_entry(template, r, base_priority + i) for i, r in enumerate(d.routes)]
+    # Lower priority sorts first. Codex's /model picker shows ~8 rows, so custom models go on top;
+    # otherwise they hide below the GPT list.
+    first = min([m.get("priority", 0) for m in models] or [0]) - len(d.routes)
+    models += [_custom_entry(template, r, first + i) for i, r in enumerate(d.routes)]
     return {"models": models}
 
 

@@ -286,3 +286,16 @@ def test_anthropic_end_to_end(tmp_path, monkeypatch):
         assert any("hello from claude" in m["content"][0]["text"] for m in compact["output"])
     finally:
         srv.shutdown()
+
+
+def test_codex_internal_items_become_text():
+    body = {"model": "alibaba/qwen", "input": [
+        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]},
+        {"type": "agent_message", "id": "am_1", "author": "worker-1",
+         "content": [{"type": "output_text", "text": "subtask done"}]},
+        {"type": "web_search_call", "id": "ws_1", "status": "completed"},
+    ]}
+    inp = sanitize_request(body, ROUTE)["input"]
+    assert [i.get("type") for i in inp] == ["message", "message"]
+    assert inp[1]["role"] == "user" and "subtask done" in inp[1]["content"][0]["text"]
+    assert "worker-1" in inp[1]["content"][0]["text"]
