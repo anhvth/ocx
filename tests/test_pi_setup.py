@@ -10,6 +10,26 @@ from opencodex_desktop import config, pi_setup, router
 from opencodex_desktop.discovery import Discovery, OpenAIAuth, Route
 
 
+def test_pi_settings_symlink_survives_sync_and_restore(tmp_path, monkeypatch):
+    home = tmp_path / "pi"
+    home.mkdir()
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(home))
+    monkeypatch.setattr(config, "TOKEN_FILE", tmp_path / "token")
+    monkeypatch.setattr(pi_setup, "TOKEN_FILE", tmp_path / "token")
+    target = tmp_path / "local-settings.json"
+    target.write_text('{"defaultModel": "gpt-test"}\n')
+    link = home / "settings.json"
+    link.symlink_to(target)
+    cfg = SimpleNamespace(base_url="http://localhost:12345/v1", default_model="gpt-test")
+    discovery = Discovery(OpenAIAuth("chatgpt"), [{"slug": "gpt-test", "context_window": 200000}], [])
+    pi_setup.apply_pi_config(cfg, discovery)
+    assert link.is_symlink()
+    assert json.loads(target.read_text())["enabledModels"] == ["opencodex-desktop/gpt-test"]
+    pi_setup.restore_pi_config(cfg)
+    assert link.is_symlink()
+    assert json.loads(target.read_text()) == {"defaultModel": "gpt-test"}
+
+
 def test_pi_sync_restore(tmp_path, monkeypatch):
     home = tmp_path / "pi"
     home.mkdir()
