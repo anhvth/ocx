@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hmac
-import html
 import io
 import json
 import os
@@ -32,6 +31,8 @@ from .anthropic_adapter import from_messages, to_messages
 from .chat_adapter import from_chat, sse_events, to_chat
 from .config import ANTHROPIC_BASE, Config, router_token
 from .messages_adapter import Translator, fold_system_messages, to_responses
+from .landing import render_landing
+from .usage import fetch_codex_usage
 from .discovery import _is_loopback, load_routes, provider_headers, read_openai_auth
 from .transforms import (compact_v1_output, compaction_body, encode_summary, is_compaction_request,
                          response_text, sanitize_request, user_texts)
@@ -132,20 +133,48 @@ class Router:
         return web.json_response({"status": "ok", "service": "opencodex-desktop", "version": __version__,
                                   "pid": os.getpid(), "openai": auth.mode, "routes": sorted(self.routes)})
 
-    async def index(self, req: web.Request) -> web.Response:
-        """What a browser sees at the router's address: the /healthz facts, readable."""
+    def _groups(self) -> list[dict[str, Any]]:
+        from .codex_setup import CATALOG
+        try:
+            catalog = json.loads(CATALOG.read_text()).get("models", [])
+        except (OSError, ValueError):
+            catalog = []
+        catalog_by_slug = {str(m.get("slug")): m for m in catalog if isinstance(m, dict)}
+        openai = []
+        for slug in sorted(set(self.gpt_models())):
+            metadata = catalog_by_slug.get(slug, {})
+            modalities = metadata.get("input_modalities") or []
+            openai.append({"slug": slug, "context": metadata.get("context_window", 0),
+                           "images": "image" in modalities,
+                           "reasoning": bool(metadata.get("supported_reasoning_levels"))})
+        providers: dict[str, list[dict[str, Any]]] = {}
+        for route in self.routes.values():
+            providers.setdefault(route.provider, []).append({
+                "slug": route.slug, "context": route.context_window,
+                "images": "image" in route.input_modalities,
+                "reasoning": any(effort not in ("none", "off") for effort in route.efforts),
+            })
+        groups = ([] if not openai else [{"provider": "OpenAI / ChatGPT", "models": openai}])
+        groups.extend({"provider": provider, "models": sorted(models, key=lambda model: model["slug"])}
+                      for provider, models in sorted(providers.items()))
+        return groups
+
+    async def landing(self, req: web.Request) -> web.Response:
+        """Serve public model metadata without exposing router credentials."""
+        # The public tunnel intentionally permits only token-authenticated Claude requests.
         if "cf-connecting-ip" in req.headers:
             return web.Response(status=403)
-        auth = read_openai_auth(self.cfg.codex_home)
-        models = self.gpt_models() + sorted(self.routes)
-        rows = "".join(f"<li><code>{html.escape(m)}</code></li>" for m in models) or "<li>none</li>"
-        return web.Response(content_type="text/html", text=(
-            f"<!doctype html><meta charset=utf-8><title>opencodex-desktop</title>"
-            f"<body style='font:15px system-ui;max-width:40em;margin:2em auto;padding:0 1em'>"
-            f"<h1>opencodex-desktop {__version__}</h1><p>Router running. OpenAI login: <b>{html.escape(auth.mode)}</b>.</p>"
-            f"<h2>Models</h2><ul>{rows}</ul>"
-            f"<p>This address is for Codex, Claude Code, Pi and OpenClaude, not for a browser; API calls need the "
-            f"router token. Changes: edit the config and run <code>opencodex-desktop start</code>.</p>"))
+        usage = await asyncio.to_thread(fetch_codex_usage, read_openai_auth(self.cfg.codex_home))
+        html_page = render_landing(__version__, self.cfg.base_url, self._groups(), usage)
+        return web.Response(text=html_page, content_type="text/html", charset="utf-8")
+
+    async def overview_api(self, req: web.Request) -> web.Response:
+        """Public read-only JSON for the dashboard's live refresh (no secrets)."""
+        if "cf-connecting-ip" in req.headers:
+            return web.Response(status=403)
+        usage = await asyncio.to_thread(fetch_codex_usage, read_openai_auth(self.cfg.codex_home))
+        return web.json_response({"version": __version__, "base_url": self.cfg.base_url,
+                                  "groups": self._groups(), "usage": usage, "ts": time.time()})
 
     def authorized(self, req: web.Request, claude: bool) -> bool:
         h = req.headers
@@ -512,7 +541,8 @@ def build_app(cfg: Config) -> web.Application:
     app.on_startup.append(router.on_startup)
     app.on_cleanup.append(router.on_cleanup)
     app.router.add_get("/healthz", router.healthz)
-    app.router.add_get("/", router.index)
+    app.router.add_get("/", router.landing)
+    app.router.add_get("/api/overview", router.overview_api)
     app.router.add_get("/favicon.ico", lambda _req: web.Response(status=204))
     app.router.add_route("*", "/{tail:.*}", router.handle)
     return app

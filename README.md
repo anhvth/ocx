@@ -141,8 +141,9 @@ The YAML above controls the list; do not maintain a separate list in Pi.
   or first discovered model). Resumed sessions retain their model: use `/model` to switch old sessions.
 - Honors `PI_CODING_AGENT_DIR`. Saves previous managed settings in `opencodex-desktop-backup.json`
   inside that directory; `off` restores them without reverting unrelated settings.
-- Provider health checks synchronize Pi's list too. Restart Pi or `/reload` after a model-list change
-  to refresh its scope. GPT models use the existing Codex login through the local router.
+- Provider health checks synchronize Pi's list too. Restart Pi after a model-list change to refresh
+  its scope (Pi resolves scoped patterns at startup). GPT models use the existing Codex login through
+  the local router.
 
 Pi reads the local router token at request time; upstream API keys are not copied into Pi's config.
 Unknown maximum output limits use Pi's conservative 16k default. Pricing is not imported, so Pi's
