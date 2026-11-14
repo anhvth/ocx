@@ -120,6 +120,8 @@ class Router:
 
     # ---------------------------------------------------------------- endpoints
     async def healthz(self, _req: web.Request) -> web.Response:
+        if "cf-connecting-ip" in _req.headers:
+            return web.Response(status=403)
         auth = read_openai_auth(self.cfg.codex_home)
         return web.json_response({"status": "ok", "service": "opencodex-desktop", "version": __version__,
                                   "pid": os.getpid(), "openai": auth.mode, "routes": sorted(self.routes)})
@@ -141,6 +143,12 @@ class Router:
         claude = tail.startswith("v1/messages") or "anthropic-version" in req.headers
         if req.method == "HEAD":  # connectivity probes (Claude Code's HEAD /api/hello) carry no token
             return web.Response(status=200)
+        if "cf-connecting-ip" in req.headers and not (claude and _same(req.headers.get("authorization"), f"Bearer {self.token}")
+                                                     or claude and _same(req.headers.get("x-api-key"), self.token)
+                                                     or claude and _same(req.headers.get("x-opencodex-token"), self.token)):
+            # through the public tunnel (Claude app SSH sessions): only the Claude endpoints, only with the token
+            _log(f"{req.method} /{tail} -> 403 (tunnel)")
+            return web.Response(status=403)
         if not self.authorized(req, claude):
             msg = ("opencodex-desktop: missing or wrong router token. Claude clients: re-run "
                    "`opencodex-desktop start` (it writes the token into Claude's settings) and restart them.")

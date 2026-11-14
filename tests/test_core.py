@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import tomlkit
 
-from opencodex_desktop import claude_setup, codex_setup, config
+from opencodex_desktop import claude_setup, codex_setup, config, tunnel
 from opencodex_desktop.anthropic_adapter import from_messages, to_messages
 from opencodex_desktop.discovery import Discovery, OpenAIAuth, Route, provider_headers
 from opencodex_desktop.transforms import decode_summary, encode_summary, sanitize_request
@@ -33,6 +33,18 @@ def test_orphan_outputs_become_user_messages():
     assert "id" not in b["input"][1]
     assert [t["type"] for t in b["tools"]] == ["function"]
     assert b["reasoning"] == {"effort": "high"} and b["store"] is False
+
+
+def test_local_deepseek_v41_efforts(monkeypatch):
+    from opencodex_desktop import discovery
+
+    model = "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+    monkeypatch.setattr(discovery, "http_json", lambda *a, **k: (200, {"data": [{"id": model, "max_model_len": 65536}]}))
+    monkeypatch.setattr(discovery, "_detect_wire", lambda *a: "responses")
+    provider = config.ProviderCfg(name="local-vllm", base_url="http://localhost/v1", models_auto=True)
+    route = discovery._discover_provider(provider)[0][0]
+    assert route.efforts == ["low", "high", "xhigh", "max"] and route.default_effort == "high"
+    assert sanitize_request({"model": route.slug, "reasoning": {"effort": "medium"}}, route)["reasoning"] == {"effort": "max"}
 
 
 def test_summary_envelope_roundtrip():
@@ -92,6 +104,8 @@ def test_claude_apply_and_restore(tmp_path, monkeypatch):
     monkeypatch.setattr(claude_setup, "CLAUDE_HOME", tmp_path / "claude")
     monkeypatch.setattr(claude_setup, "SETTINGS", tmp_path / "claude" / "settings.json")
     monkeypatch.setattr(claude_setup, "DESKTOP", tmp_path / "desktop")
+    for name in ("PIDFILE", "URLFILE", "LOGFILE"):
+        monkeypatch.setattr(tunnel, name, tmp_path / name)
     (tmp_path / "claude").mkdir()
     (tmp_path / "real.json").write_text(json.dumps({"theme": "dark", "env": {"FOO": "1"},
                                                     "modelPicker": {"options": [{"model": "mine"}]}}))

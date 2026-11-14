@@ -121,7 +121,7 @@ extended-thinking budget (`low` 4k, `medium` 16k, `high` 32k tokens, capped to f
 | path | contents |
 |---|---|
 | `~/.config/opencodex-desktop/config.yaml` | your config (the only file you edit) |
-| `~/.local/state/opencodex-desktop/` | `router.log`, `router.pid`, `routes.json`, `model-catalog.json`, `token` |
+| `~/.local/state/opencodex-desktop/` | `router.log`, `router.pid`, `routes.json`, `model-catalog.json`, `token`, `tunnel.{pid,url,log}` |
 | `~/.claude/settings.json` | `env` (router URL + token header), `modelPicker.options`, `modelSettings`; backed up as `settings.json.bak-opencodex-desktop-*` |
 | `~/Library/Application Support/Claude-3p/configLibrary/` | the Claude app's `opencodex-desktop` gateway profile (macOS) |
 | `$CODEX_HOME/config.toml` | gets `model_provider`, `model_catalog_json`, `[model_providers.opencodex-desktop]`; backed up as `config.toml.bak-opencodex-desktop-*` before every change |
@@ -144,9 +144,18 @@ app (third-party mode) with the Claude, GPT and routed models; restart the app t
 - Routed models are sent to the provider's Anthropic Messages endpoint, set as `anthropic_url:`
   (defaults to `base_url` for local endpoints such as vLLM). Providers without one are Codex-only.
 - Claude Code warns `unrecognized_model` for custom ids; harmless. 1M-context models get a `[1m]` suffix.
-- Claude app SSH sessions call the gateway from the remote host, and the app refuses a loopback
-  gateway for them, so this profile serves local sessions only. On a remote, run `start` there and
-  use `claude` in a terminal.
+- Claude app **SSH sessions** call the gateway from the remote host, and the app refuses a localhost
+  gateway for them. Opt in with
+  ```yaml
+  claude_app:
+    ssh_hosts: [h76, h2-14, h200-login]   # ssh aliases; list jump hosts too
+  ```
+  and `start` puts the router behind a Cloudflare quick tunnel (`cloudflared`, `brew install cloudflared`),
+  points the app's profile at it and sets `sshHostAllowlist` (aliases + resolved HostNames + ProxyJump
+  hosts). Through the tunnel only `/v1/messages` and `/v1/models` answer, and only with the router token;
+  everything else is 403. The URL changes when the tunnel restarts (`start` updates the profile;
+  reopen the app). `stop`/`off`, or removing `claude_app`, close it. SSH sessions see the Mac's models
+  (not a remote's local vLLM).
 
 Anthropic does not support non-Claude models behind Claude Code; treat that part as best effort.
 

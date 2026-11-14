@@ -29,7 +29,7 @@ Repo: https://github.com/anhvth/opencodex-desktop (source in `~/projects/opencod
 (list of candidates; `$CODEX_HOME` wins), `listen`, `openai.{enabled,include}`,
 `anthropic.{enabled, api_key|api_key_env|api_key_file, base_url, models, include}` (built-in Claude
 provider; key defaults to `$ANTHROPIC_API_KEY`, base_url to `https://api.anthropic.com/v1`),
-`default_model`,
+`default_model`, `claude_app.ssh_hosts` (Claude app SSH sessions via a public tunnel),
 `providers.<name>.{base_url, api_key|api_key_env|api_key_file, models: auto|[...], include, wire_api,
 headers, enabled, anthropic_url}` (`wire_api: responses|chat|anthropic`; `anthropic_url` = the
 provider's Anthropic Messages endpoint, needed for its models to show up in Claude clients), per model `{context_window,
@@ -95,7 +95,7 @@ config's model unless you pass `-m`.
     `anthropic-version` header), authenticated by the router token (`x-opencodex-token` /
     `x-api-key` / Bearer). Claude Code sends `role: system` entries inside `messages`; they are folded
     into the user turn for non-Anthropic providers (Alibaba answers "Request body format invalid"
-    otherwise). The Claude app refuses a loopback gateway for SSH sessions (the remote calls it), so
-    remote Claude app sessions are not served; use `claude` in a terminal on the remote.
+    otherwise). The Claude app refuses a loopback gateway for SSH sessions (the remote calls it):
+    `claude_app.ssh_hosts` opens a token-protected Cloudflare quick tunnel and sets `sshHostAllowlist`.
 15. Old slugs (e.g. `qwen-token-plan/qwen4-max-preview`) are matched by model name to the one route serving
     that model; unknown `x/y` slugs get a 404 listing the available models.

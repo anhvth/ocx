@@ -9,6 +9,11 @@ codex_home: [~/.codex]
 # Router address Codex will talk to.
 listen: 127.0.0.1:11111
 
+# Claude app SSH sessions (optional): the remote calls the gateway itself, so this opens a public,
+# token-protected Cloudflare quick tunnel to the router (needs cloudflared). List jump hosts too.
+# claude_app:
+#   ssh_hosts: [my-gpu-box]
+
 # Your ChatGPT/OpenAI models come from the Codex login (codex login / Codex app sign-in).
 openai:
   enabled: true

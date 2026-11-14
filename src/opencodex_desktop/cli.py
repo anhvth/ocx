@@ -152,7 +152,10 @@ def cmd_off(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_stop(cfg: Config, args: argparse.Namespace) -> int:
+    from . import tunnel
     _stop_router(cfg)
+    if tunnel.stop():
+        ui.ok("closed the Claude app tunnel")
     ui.warn("Codex config still points at the router; run `opencodex-desktop off` to go back to defaults")
     return 0
 

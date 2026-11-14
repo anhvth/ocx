@@ -65,6 +65,8 @@ class Config:
     openai_include: list[str]
     default_model: str | None
     providers: list[ProviderCfg]
+    # Claude app SSH sessions: ssh aliases allowed (non-empty => the router gets a public tunnel)
+    claude_ssh_hosts: list[str] = field(default_factory=list)
 
     @property
     def anthropic_base(self) -> str:
@@ -220,6 +222,7 @@ def load(path: str | os.PathLike[str] | None = None) -> Config:
         openai_include=list(openai.get("include") or []),
         default_model=raw.get("default_model"),
         providers=providers,
+        claude_ssh_hosts=[str(h) for h in ((raw.get("claude_app") or {}).get("ssh_hosts") or [])],
     )
 
 

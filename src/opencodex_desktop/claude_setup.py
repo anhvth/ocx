@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import ui
+from . import tunnel, ui
 from .config import Config, router_token
 from .discovery import Discovery
 
@@ -151,6 +151,28 @@ def _desktop_running() -> bool:
                                                        stderr=subprocess.DEVNULL).returncode == 0
 
 
+def _ssh_allowlist(aliases: list[str]) -> list[str]:
+    """The app matches the resolved HostName (and every jump host), so list aliases and what they resolve to."""
+    out: list[str] = []
+    todo = list(aliases)
+    while todo:
+        h = todo.pop(0)
+        if h in out:
+            continue
+        out.append(h)
+        try:
+            lines = subprocess.run(["ssh", "-G", h], capture_output=True, text=True, timeout=10).stdout.splitlines()
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for line in lines:
+            k, _, v = line.partition(" ")
+            if k == "hostname" and v not in out:
+                out.append(v)
+            elif k == "proxyjump" and v != "none":
+                todo += [j.split("@")[-1].split(":")[0] for j in v.split(",")]
+    return out
+
+
 def apply_desktop_config(cfg: Config, rows: list[dict[str, Any]]) -> None:
     if sys.platform != "darwin" or not DESKTOP.exists():
         return
@@ -166,11 +188,26 @@ def apply_desktop_config(cfg: Config, rows: list[dict[str, Any]]) -> None:
         if r["ctx"] >= ONE_M:
             entry["supports1m"] = True
         models.append(entry)
+    base = cfg.anthropic_base
+    if cfg.claude_ssh_hosts:
+        try:
+            base = tunnel.start(cfg)
+        except RuntimeError as e:
+            ui.err(f"Claude app SSH sessions: {e}")
+        else:
+            ui.ok(f"Claude app SSH sessions: public tunnel {base} (router token required)")
+    else:
+        tunnel.stop()
     path = lib / f"{PROFILE_ID}.json"
     profile = _read(path)
+    allow = _ssh_allowlist(cfg.claude_ssh_hosts) if base != cfg.anthropic_base else []
+    if allow:
+        profile["sshHostAllowlist"] = allow
+    else:
+        profile.pop("sshHostAllowlist", None)
     profile.update({
         "inferenceProvider": "gateway",
-        "inferenceGatewayBaseUrl": cfg.anthropic_base,
+        "inferenceGatewayBaseUrl": base,
         "inferenceGatewayAuthScheme": "bearer",
         "inferenceGatewayApiKey": router_token(),
         "inferenceModels": models,
@@ -195,6 +232,7 @@ def apply_desktop_config(cfg: Config, rows: list[dict[str, Any]]) -> None:
 
 
 def restore_desktop_config() -> None:
+    tunnel.stop()
     lib = DESKTOP / "configLibrary"
     meta_path = lib / "_meta.json"
     if sys.platform != "darwin" or not meta_path.exists():
