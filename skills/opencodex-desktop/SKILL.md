@@ -1,6 +1,6 @@
 ---
 name: opencodex-desktop
-description: Set up, change, debug or turn off custom models (Alibaba Qwen, local vLLM, any OpenAI-compatible endpoint) in the Codex Desktop app and codex CLI next to ChatGPT models, using the opencodex-desktop tool (one YAML file + `opencodex-desktop start`). Use when the user wants Desktop/Codex to see or accept Qwen/vLLM/custom models, add a model or provider, fix context windows, set it up on a new machine or SSH remote, or go back to plain Codex; or when Desktop shows "Unknown model", "call_id is required for function_call_output", "missing both base_instructions", missing models in the picker, or a provider 400.
+description: Set up, change, debug or turn off custom models (Alibaba Qwen, Anthropic Claude, local vLLM, any OpenAI-compatible endpoint) in the Codex Desktop app and codex CLI next to ChatGPT models, using the opencodex-desktop tool (one YAML file + `opencodex-desktop start`). Use when the user wants Desktop/Codex to see or accept Qwen/Claude/vLLM/custom models, add a model or provider, fix context windows, set it up on a new machine or SSH remote, or go back to plain Codex; or when Desktop shows "Unknown model", "call_id is required for function_call_output", "missing both base_instructions", missing models in the picker, or a provider 400.
 ---
 
 # opencodex-desktop
@@ -14,6 +14,10 @@ Repo: https://github.com/anhvth/opencodex-desktop (source in `~/projects/opencod
   `model_provider`, `model_catalog_json`, `[model_providers.opencodex-desktop]` (backup first).
 - The router (`127.0.0.1:11111`) sends `gpt-*` to ChatGPT with Codex's own auth header (fast mode
   passes through), and `<provider>/<model>` to that provider after sanitizing the request.
+- `anthropic/claude-*` uses the native Anthropic Messages API (`x-api-key`, `/v1/messages`): the
+  router translates Responses ↔ Messages, including tool calls and reasoning effort → thinking
+  budget. Enabled automatically when `$ANTHROPIC_API_KEY` is set, or via the `anthropic:` config
+  block. Other providers speak `/responses` or `/chat/completions` (auto-detected).
 - The model picker and context window come from the catalog JSON the tool writes
   (`~/.local/state/opencodex-desktop/model-catalog.json`).
 - One router per machine. A Desktop chat on an SSH remote runs its app-server on the remote host,
@@ -22,10 +26,14 @@ Repo: https://github.com/anhvth/opencodex-desktop (source in `~/projects/opencod
 ## Everything the user edits
 
 `~/.config/opencodex-desktop/config.yaml` (create with `opencodex-desktop init`). Fields: `codex_home`
-(list of candidates; `$CODEX_HOME` wins), `listen`, `openai.{enabled,include}`, `default_model`,
+(list of candidates; `$CODEX_HOME` wins), `listen`, `openai.{enabled,include}`,
+`anthropic.{enabled, api_key|api_key_env|api_key_file, base_url, models, include}` (built-in Claude
+provider; key defaults to `$ANTHROPIC_API_KEY`, base_url to `https://api.anthropic.com/v1`),
+`default_model`,
 `providers.<name>.{base_url, api_key|api_key_env|api_key_file, models: auto|[...], include, wire_api,
-headers, enabled}`, per model `{context_window, max_output_tokens, reasoning_efforts, default_effort,
-display_name, input_modalities}`. See `examples/config.yaml` in the repo.
+headers, enabled}` (`wire_api: responses|chat|anthropic`), per model `{context_window,
+max_output_tokens, reasoning_efforts, default_effort, display_name, input_modalities}`.
+See `examples/config.yaml` in the repo.
 
 ## Common tasks
 
@@ -33,6 +41,7 @@ display_name, input_modalities}`. See `examples/config.yaml` in the repo.
 |---|---|
 | first setup / after any change | `opencodex-desktop start`, then the user restarts the Codex app |
 | add a model/provider | edit the YAML, `start` again |
+| add Claude models | set `$ANTHROPIC_API_KEY` (or `anthropic: {api_key_file: ...}`), `start` again; pick `anthropic/claude-*` |
 | fix a context window | set `context_window` on the model (vLLM reports it itself with `models: auto`) |
 | back to plain Codex | `opencodex-desktop off` (stops router, removes the 3 keys, resets a routed `model`) |
 | what is going on | `opencodex-desktop status`; log `~/.local/state/opencodex-desktop/router.log` |
@@ -72,3 +81,8 @@ config's model unless you pass `-m`.
    empty / resource busy" (the running router holds `.nfs*` files). Then `start` again.
 10. After `start` (or a restart of the router), run `opencodex-desktop start` again on a host whose
     vLLM was down: its models come back only after a new `start`.
+11. Claude needs an Anthropic **API key** (console.anthropic.com), not a Claude Pro/Max subscription.
+    For an Anthropic-compatible gateway set `anthropic.base_url` (wire stays `anthropic`).
+12. Claude thinking budgets are capped to `max_tokens - 1024`; if `max_output_tokens` is tiny,
+    thinking is silently disabled. Forced tool use (`tool_choice: required`) is downgraded to auto
+    while thinking is on (Anthropic rejects the combination).

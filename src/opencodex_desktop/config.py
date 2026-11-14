@@ -19,6 +19,8 @@ DEFAULT_LISTEN = "127.0.0.1:11111"
 DEFAULT_PROVIDER_ID = "opencodex-desktop"
 DEFAULT_CONTEXT = 128_000
 DEFAULT_EFFORTS = ["low", "medium", "high"]
+ANTHROPIC_BASE = "https://api.anthropic.com/v1"
+ANTHROPIC_CONTEXT = 200_000
 
 
 class ConfigError(Exception):
@@ -122,6 +124,48 @@ def _model(entry: Any) -> ModelCfg:
     )
 
 
+def _provider(name: str, pr: dict[str, Any]) -> ProviderCfg:
+    if "/" in name:
+        raise ConfigError(f"provider name '{name}' must not contain '/'")
+    if not pr.get("base_url"):
+        raise ConfigError(f"provider '{name}': base_url is required")
+    key, source = _resolve_key(name, pr)
+    models_raw = pr.get("models", "auto")
+    auto = models_raw in ("auto", None)
+    wire = pr.get("wire_api")
+    if wire is None and "anthropic.com" in str(pr["base_url"]):
+        wire = "anthropic"
+    if wire not in (None, "responses", "chat", "anthropic"):
+        raise ConfigError(f"provider '{name}': wire_api must be responses, chat or anthropic")
+    return ProviderCfg(
+        name=name,
+        base_url=str(pr["base_url"]).rstrip("/"),
+        api_key=key,
+        api_key_source=source,
+        wire_api=wire,
+        models_auto=auto,
+        include=list(pr.get("include") or []),
+        models=[] if auto else [_model(m) for m in models_raw],
+        headers={str(k): str(v) for k, v in (pr.get("headers") or {}).items()},
+        enabled=pr.get("enabled", True) is not False,
+    )
+
+
+def _anthropic_provider(raw: dict[str, Any], taken: set[str]) -> ProviderCfg | None:
+    """Built-in claude-* support: an `anthropic:` block, or just $ANTHROPIC_API_KEY."""
+    block = raw.get("anthropic")
+    if "anthropic" in taken or (block is None and "ANTHROPIC_API_KEY" not in os.environ):
+        return None
+    block = dict(block or {})
+    if block.get("enabled", True) is False:
+        return None
+    block.setdefault("base_url", ANTHROPIC_BASE)
+    block.setdefault("wire_api", "anthropic")
+    if not any(k in block for k in ("api_key", "api_key_env", "api_key_file")):
+        block["api_key_env"] = "ANTHROPIC_API_KEY"
+    return _provider("anthropic", block)
+
+
 def load(path: str | os.PathLike[str] | None = None) -> Config:
     explicit = path is not None or "OPENCODEX_DESKTOP_CONFIG" in os.environ
     p = _expand(str(path or os.environ.get("OPENCODEX_DESKTOP_CONFIG") or DEFAULT_CONFIG))
@@ -141,29 +185,10 @@ def load(path: str | os.PathLike[str] | None = None) -> Config:
     openai = raw.get("openai") or {}
     providers: list[ProviderCfg] = []
     for name, pr in (raw.get("providers") or {}).items():
-        pr = pr or {}
-        if "/" in name:
-            raise ConfigError(f"provider name '{name}' must not contain '/'")
-        if not pr.get("base_url"):
-            raise ConfigError(f"provider '{name}': base_url is required")
-        key, source = _resolve_key(name, pr)
-        models_raw = pr.get("models", "auto")
-        auto = models_raw in ("auto", None)
-        wire = pr.get("wire_api")
-        if wire not in (None, "responses", "chat"):
-            raise ConfigError(f"provider '{name}': wire_api must be responses or chat")
-        providers.append(ProviderCfg(
-            name=name,
-            base_url=str(pr["base_url"]).rstrip("/"),
-            api_key=key,
-            api_key_source=source,
-            wire_api=wire,
-            models_auto=auto,
-            include=list(pr.get("include") or []),
-            models=[] if auto else [_model(m) for m in models_raw],
-            headers={str(k): str(v) for k, v in (pr.get("headers") or {}).items()},
-            enabled=pr.get("enabled", True) is not False,
-        ))
+        providers.append(_provider(name, pr or {}))
+    anth = _anthropic_provider(raw, {p.name for p in providers})
+    if anth is not None:
+        providers.append(anth)
 
     return Config(
         path=p if p.exists() else None,

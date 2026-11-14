@@ -169,8 +169,25 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         ui.ok(f"Codex uses the router (model: {doc.get('model', '-')})")
     else:
         ui.info(f"Codex is on its default provider ({doc.get('model_provider', 'openai')}); router is off for Codex")
-    for r in load_routes():
-        ui.info(f"{r.slug:50s} ctx {ui.fmt_tokens(r.context_window):>5s} ({r.context_source}) wire {r.wire}")
+    from .discovery import http_json, provider_headers
+    routes = load_routes()
+    for p in cfg.providers:
+        if not p.enabled:
+            continue
+        try:
+            code, _ = http_json("GET", f"{p.base_url}/models", headers=provider_headers(p), timeout=5)
+            up = code == 200
+            why = f"HTTP {code}"
+        except OSError as e:
+            up, why = False, str(getattr(e, "reason", e))
+        mine = [r for r in routes if r.provider == p.name]
+        if up:
+            ui.ok(f"{p.name}: reachable, {len(mine)} model(s) listed in Codex")
+        else:
+            ui.warn(f"{p.name}: NOT reachable ({why}); its models are not listed"
+                    + (" (the router drops them within a minute)" if mine else ""))
+        for r in mine:
+            ui.info(f"{r.slug:50s} ctx {ui.fmt_tokens(r.context_window):>5s} ({r.context_source}) wire {r.wire}")
     return 0
 
 

@@ -17,6 +17,15 @@ openai:
 # Model selected in Codex after start (optional). Format: <provider>/<model> or a GPT slug.
 # default_model: alibaba/qwen4-max-preview
 
+# Claude models (anthropic/claude-*). Enabled automatically when $ANTHROPIC_API_KEY is set;
+# uncomment to configure explicitly. Needs an Anthropic API key (not a Claude subscription).
+# anthropic:
+#   enabled: true
+#   api_key_env: ANTHROPIC_API_KEY          # or api_key_file: ~/.config/anthropic/api_key, or api_key: sk-ant-...
+#   base_url: https://api.anthropic.com/v1  # any Anthropic-compatible gateway works too
+#   models: auto                            # everything /v1/models lists, or an explicit list like below
+#   # include: [claude-sonnet, claude-opus] # substring filter for `auto`
+
 # Any OpenAI-compatible endpoint. Models that are unreachable or not served are dropped.
 # Context window: value here, else what the provider's /models reports, else 128k (with a warning).
 providers:

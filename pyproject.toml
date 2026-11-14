@@ -1,12 +1,12 @@
 [project]
 name = "opencodex-desktop"
 version = "0.1.0"
-description = "Use Qwen, local vLLM, or any OpenAI-compatible model in the Codex Desktop app and CLI next to your ChatGPT models, from one YAML file"
+description = "Use Qwen, Claude, local vLLM, or any OpenAI-compatible model in the Codex Desktop app and CLI next to your ChatGPT models, from one YAML file"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "anhvth" }]
-keywords = ["codex", "codex-desktop", "openai", "qwen", "vllm", "proxy", "uvx"]
+keywords = ["codex", "codex-desktop", "openai", "qwen", "claude", "anthropic", "vllm", "proxy", "uvx"]
 dependencies = [
     "aiohttp>=3.9",
     "pyyaml>=6",

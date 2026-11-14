@@ -7,6 +7,9 @@ the Authorization header Codex sends, so GPT models keep using your normal Codex
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import io
 import json
 import os
 import time
@@ -17,6 +20,7 @@ import aiohttp
 from aiohttp import web
 
 from . import __version__
+from .anthropic_adapter import from_messages, to_messages
 from .chat_adapter import from_chat, sse_events, to_chat
 from .config import Config
 from .discovery import _is_loopback, load_routes, provider_headers, read_openai_auth
@@ -47,11 +51,44 @@ class Router:
         timeout = aiohttp.ClientTimeout(total=None, sock_connect=20, sock_read=900)
         self.direct = aiohttp.ClientSession(trust_env=False, timeout=timeout, auto_decompress=True)
         self.proxied = aiohttp.ClientSession(trust_env=True, timeout=timeout, auto_decompress=True)
+        if self.cfg.providers and HEALTH_INTERVAL > 0:
+            self.monitor = asyncio.create_task(self.watch_providers())
 
     async def on_cleanup(self, _app: web.Application) -> None:
+        if getattr(self, "monitor", None):
+            self.monitor.cancel()
         for s in (self.direct, self.proxied):
             if s:
                 await s.close()
+
+    async def watch_providers(self) -> None:
+        """Re-discover periodically; drop unreachable models from the catalog, re-add recovered ones.
+
+        Codex reads the catalog when an app-server/CLI session starts, so the change shows up in the
+        next Codex session or Desktop relaunch; requests to a dropped model fail fast meanwhile.
+        """
+        while True:
+            await asyncio.sleep(HEALTH_INTERVAL)
+            try:
+                d, out = await asyncio.to_thread(_quiet_discover, self.cfg)
+            except Exception as e:  # never let the monitor kill the router
+                _log(f"health check failed: {e!r}")
+                continue
+            new = {r.slug: r for r in d.routes}
+            if set(new) == set(self.routes):
+                continue
+            for slug in sorted(set(self.routes) - set(new)):
+                _log(f"⚠ {slug} is no longer reachable; removed from the Codex model list")
+            for slug in sorted(set(new) - set(self.routes)):
+                _log(f"✓ {slug} is reachable again; added to the Codex model list")
+            for line in out.splitlines():
+                if "⚠" in line or "✗" in line:
+                    _log(line.strip())
+            from .codex_setup import build_catalog, write_catalog
+            from .discovery import save_routes
+            save_routes(d.routes)
+            write_catalog(build_catalog(d))
+            self.routes = new
 
     def session(self, url: str) -> aiohttp.ClientSession:
         assert self.direct and self.proxied
@@ -73,6 +110,10 @@ class Router:
                 body = None
             if isinstance(body, dict) and body.get("model") in self.routes:
                 return await self.routed(req, tail, body)
+            if isinstance(body, dict) and "/" in str(body.get("model", "")):
+                return _error(503, f"opencodex-desktop: {body['model']} is not reachable right now (its provider "
+                                   "is down or no longer serves it); pick another model. `opencodex-desktop status` "
+                                   "shows what is up.", "model_unavailable")
         return await self.forward_openai(req, tail, raw)
 
     # ---------------------------------------------------------------- ChatGPT / OpenAI
@@ -144,9 +185,10 @@ class Router:
             return await self.replay(req, body, route, [item], None)
 
         b = sanitize_request(body, route)
-        if route.wire == "chat":
+        if route.wire in ("chat", "anthropic"):
             try:
-                items, usage = await self.chat_call(b, route, headers)
+                items, usage = await (self.anthropic_call(b, route, headers) if route.wire == "anthropic"
+                                      else self.chat_call(b, route, headers))
             except UpstreamError as e:
                 return _error(e.status, e.message)
             return await self.replay(req, body, route, items, usage)
@@ -182,12 +224,29 @@ class Router:
         resp = await self.post_json(f"{route.base_url}/chat/completions", headers, chat)
         return from_chat(resp, custom)
 
+    async def anthropic_call(self, b: dict[str, Any], route: Any, headers: dict[str, str]):
+        payload, custom = to_messages(b, route)
+        resp = await self.post_json(f"{route.base_url}/messages", headers, payload)
+        return from_messages(resp, custom)
+
     async def summarize(self, body: dict[str, Any], route: Any, headers: dict[str, str]) -> str:
         cb = compaction_body(body, route)
-        if route.wire == "chat":
-            items, _ = await self.chat_call(cb, route, headers)
+        if route.wire in ("chat", "anthropic"):
+            items, _ = await (self.anthropic_call(cb, route, headers) if route.wire == "anthropic"
+                              else self.chat_call(cb, route, headers))
             return "\n".join(c.get("text", "") for i in items if i["type"] == "message" for c in i["content"])
         return response_text(await self.post_json(f"{route.base_url}/responses", headers, cb))
+
+
+HEALTH_INTERVAL = int(os.environ.get("OPENCODEX_DESKTOP_HEALTH_INTERVAL", "60"))
+
+
+def _quiet_discover(cfg: Config):
+    from .discovery import discover
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        d = discover(cfg)
+    return d, buf.getvalue()
 
 
 class UpstreamError(Exception):

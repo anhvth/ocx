@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from . import ui
-from .config import DEFAULT_CONTEXT, DEFAULT_EFFORTS, STATE_DIR, Config, ProviderCfg
+from .config import ANTHROPIC_CONTEXT, DEFAULT_CONTEXT, DEFAULT_EFFORTS, STATE_DIR, Config, ProviderCfg
 
 CHATGPT_BASE = "https://chatgpt.com/backend-api/codex"
 OPENAI_API_BASE = "https://api.openai.com/v1"
@@ -154,6 +154,8 @@ def _wire_cache() -> dict[str, str]:
 def _detect_wire(p: ProviderCfg, model: str, headers: dict[str, str]) -> str:
     if p.wire_api:
         return p.wire_api
+    if "anthropic.com" in p.base_url:
+        return "anthropic"
     cache = _wire_cache()
     if p.base_url in cache:
         return cache[p.base_url]
@@ -169,7 +171,11 @@ def _detect_wire(p: ProviderCfg, model: str, headers: dict[str, str]) -> str:
 def provider_headers(p: ProviderCfg) -> dict[str, str]:
     h = dict(p.headers)
     if p.api_key:
-        h["authorization"] = f"Bearer {p.api_key}"
+        if p.wire_api == "anthropic":
+            h.setdefault("x-api-key", p.api_key)
+            h.setdefault("anthropic-version", "2023-06-01")
+        else:
+            h["authorization"] = f"Bearer {p.api_key}"
     return h
 
 
@@ -207,7 +213,13 @@ def _discover_provider(p: ProviderCfg) -> tuple[list[Route], bool]:
         if served is not None and m.id not in served:
             ui.warn(f"{m.id}: not served by the provider; not listed")
             continue
-        listed = _context_from(served.get(m.id, {})) if served else None
+        try:
+            wire = _detect_wire(p, m.id, headers)
+        except (urllib.error.URLError, OSError, TimeoutError) as e:
+            ui.warn(f"{m.id}: probe failed ({e}); not listed")
+            continue
+        entry = served.get(m.id, {}) if served else {}
+        listed = _context_from(entry) if served else None
         if m.context_window:
             ctx, src = int(m.context_window), "config"
             if listed and listed < ctx:
@@ -215,24 +227,28 @@ def _discover_provider(p: ProviderCfg) -> tuple[list[Route], bool]:
                 ctx, src = listed, "provider"
         elif listed:
             ctx, src = listed, "provider /models"
+        elif wire == "anthropic":
+            ctx, src = ANTHROPIC_CONTEXT, "anthropic default"
         else:
             ctx, src = DEFAULT_CONTEXT, "default"
             ui.warn(f"{m.id}: context window unknown; using {ui.fmt_tokens(ctx)} (set context_window in the config)")
         if ctx < MIN_CONTEXT:
             ui.warn(f"{m.id}: context {ui.fmt_tokens(ctx)} is below the ~{ui.fmt_tokens(MIN_CONTEXT)} Codex needs for its own prompt; not listed")
             continue
-        try:
-            wire = _detect_wire(p, m.id, headers)
-        except (urllib.error.URLError, OSError, TimeoutError) as e:
-            ui.warn(f"{m.id}: probe failed ({e}); not listed")
-            continue
         efforts = m.reasoning_efforts or list(DEFAULT_EFFORTS)
         default = m.default_effort or ("medium" if "medium" in efforts else efforts[-1])
+        max_out, display, modalities = m.max_output_tokens, m.display_name, m.input_modalities
+        if wire == "anthropic":
+            # Anthropic /models reports max_tokens (output) and display_name; Claude takes images.
+            if max_out is None and isinstance(entry.get("max_tokens"), int):
+                max_out = entry["max_tokens"]
+            display = display or entry.get("display_name")
+            modalities = modalities or ["text", "image"]
         routes.append(Route(
             slug=f"{p.name}/{m.id}", provider=p.name, upstream_model=m.id, base_url=p.base_url,
-            wire=wire, context_window=ctx, context_source=src, max_output_tokens=m.max_output_tokens,
-            efforts=efforts, default_effort=default, display_name=m.display_name,
-            input_modalities=m.input_modalities or ["text"],
+            wire=wire, context_window=ctx, context_source=src, max_output_tokens=max_out,
+            efforts=efforts, default_effort=default, display_name=display,
+            input_modalities=modalities or ["text"],
         ))
         ui.ok(f"{p.name}/{m.id}  ctx {ui.fmt_tokens(ctx)} ({src})  wire {wire}")
     return routes, True

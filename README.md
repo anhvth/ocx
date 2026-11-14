@@ -1,12 +1,14 @@
 # opencodex-desktop
 
-Use **Qwen (Alibaba), local vLLM, or any OpenAI-compatible model** in the **Codex Desktop app** and the
-`codex` CLI, side by side with your normal ChatGPT models (fast mode included). One YAML file, one command.
+Use **Qwen (Alibaba), Claude (Anthropic), local vLLM, or any OpenAI-compatible model** in the **Codex
+Desktop app** and the `codex` CLI, side by side with your normal ChatGPT models (fast mode included).
+One YAML file, one command.
 
 ```
 Codex app / codex CLI ──► opencodex-desktop router (127.0.0.1:11111)
                               ├─ gpt-*            ──► ChatGPT (your existing Codex login, untouched)
                               ├─ alibaba/qwen…    ──► Alibaba Token Plan
+                              ├─ anthropic/claude…──► Anthropic Messages API
                               └─ local-vllm/…     ──► http://127.0.0.1:7788/v1
 ```
 
@@ -19,6 +21,7 @@ A ChatGPT sign-in (`codex login` or the app) is only needed for the GPT models.
 uv tool install git+https://github.com/anhvth/opencodex-desktop   # once
 
 # 1. ChatGPT models only: works with no config if you are signed in to Codex
+#    (claude-* models join automatically when $ANTHROPIC_API_KEY is set)
 opencodex-desktop start
 
 # 2. Add other models: write the config, edit it, start again
@@ -57,6 +60,8 @@ listen: 127.0.0.1:11111
 openai: {enabled: true}         # GPT models from your Codex login
 # default_model: alibaba/qwen4-max-preview
 
+anthropic: {}                   # claude-* from $ANTHROPIC_API_KEY; or set api_key/api_key_file below
+
 providers:
   alibaba:
     base_url: https://token-plan.maas.qwencloudapi.com/compatible-mode/v1
@@ -71,8 +76,11 @@ providers:
 
 Also supported (see [`examples/config.yaml`](examples/config.yaml) for all fields):
 
+- `anthropic` — built-in Claude provider: `api_key` / `api_key_env` (default `ANTHROPIC_API_KEY`) /
+  `api_key_file`, `base_url` (any Anthropic-compatible gateway), `models: auto` or a list, `include`,
+  `enabled`. Needs an Anthropic **API key**, not a Claude subscription.
 - `openai.include` — allow-list of GPT slugs to expose.
-- Per provider: `enabled`, `headers`, `wire_api` (`responses`/`chat`, auto-detected if omitted),
+- Per provider: `enabled`, `headers`, `wire_api` (`responses`/`chat`/`anthropic`, auto-detected if omitted),
   and `include` — substring filters when `models: auto`.
 - Per model: `display_name`, `reasoning_efforts`, `default_effort`, `input_modalities`.
 
@@ -87,7 +95,8 @@ Also supported (see [`examples/config.yaml`](examples/config.yaml) for all field
   `max_model_len`, etc.), else 128k with a warning. A config value larger than what the provider reports
   is capped. Codex's auto-compaction is set to 90% of it.
 - **Wire API**: `/responses` is used when the provider has it; otherwise it falls back to
-  `/chat/completions` automatically.
+  `/chat/completions` automatically. Anthropic endpoints (`wire_api: anthropic`) use the native
+  `/v1/messages` API with `x-api-key` auth.
 
 ## What the router fixes for non-OpenAI models
 
@@ -100,6 +109,10 @@ Codex sends OpenAI-only data that other providers reject. For routed models the 
   by asking the same model for a summary.
 
 GPT requests pass through untouched (fast mode / `service_tier` included).
+
+For Claude, the router translates Responses ↔ Anthropic Messages: tool calls (including Codex's
+freeform `apply_patch`), images, and system/developer messages; reasoning effort becomes an
+extended-thinking budget (`low` 4k, `medium` 16k, `high` 32k tokens, capped to fit `max_tokens`).
 
 ## Files
 
