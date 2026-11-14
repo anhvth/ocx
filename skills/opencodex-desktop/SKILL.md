@@ -66,3 +66,9 @@ config's model unless you pass `-m`.
 5. A Desktop chat stays bound to its model's provider. After `off`, old Qwen threads won't continue.
 6. The Desktop rewrites `model` in config.toml when the user picks a model; that's expected.
 7. Port taken by another program → `start` refuses; set `listen:`.
+8. Hosts that can't reach GitHub over HTTPS (h2-14 behind a proxy): `uv build --wheel` on the Mac,
+   `scp` the wheel, then `uv tool install --force <wheel>` there.
+9. On NFS homes, `opencodex-desktop stop` before reinstalling, or uv fails with "Directory not
+   empty / resource busy" (the running router holds `.nfs*` files). Then `start` again.
+10. After `start` (or a restart of the router), run `opencodex-desktop start` again on a host whose
+    vLLM was down: its models come back only after a new `start`.
