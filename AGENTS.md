@@ -37,7 +37,12 @@ Every non-OpenAI model Codex sees is named `<provider>/<model-id>`:
   transforms against vLLM, not just Alibaba.
 - Claude face (`messages_adapter.py`, `claude_setup.py`): Claude Code's own OAuth token is passed
   through to api.anthropic.com only, never to another provider. Never use a Claude subscription login
-  for anything but Claude Code's own requests (the Claude app's gateway needs an Anthropic API key). Test Claude Code with `claude -p ... --settings <file>` pointing at an
+  for anything but Claude Code's own requests (the Claude app's gateway needs an Anthropic API key).
+  The rule is about the credential, not the model: claude-* reach Codex, Pi, OpenClaude and the Claude
+  app only through an `anthropic:` API key. Without one (the owner's choice: no key) those clients list
+  GPT + `<provider>/*` only, and Claude models stay in Claude Code. Don't add an OAuth fallback, don't
+  present requests as Claude Code's, and don't add an `anthropic:` block whose key file is missing
+  (`start` fails for every model). The other direction is fine: Claude Code may use any routed model. Test Claude Code with `claude -p ... --settings <file>` pointing at an
   isolated router port, never by editing the user's live `~/.claude/settings.json` by hand.
 - Never print or commit API keys; show at most the last 4 characters.
 
