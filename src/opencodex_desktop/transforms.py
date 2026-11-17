@@ -142,7 +142,7 @@ def sanitize_request(body: dict[str, Any], route: Route) -> dict[str, Any]:
     if isinstance(reasoning, dict):
         effort = reasoning.get("effort")
         if effort and effort not in route.efforts:
-            effort = route.efforts[-1] if route.efforts else None
+            effort = route.default_effort if route.default_effort in route.efforts else (route.efforts[-1] if route.efforts else None)
         b["reasoning"] = {"effort": effort} if effort else None
         if b["reasoning"] is None:
             b.pop("reasoning")

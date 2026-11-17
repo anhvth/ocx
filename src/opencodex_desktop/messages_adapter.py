@@ -32,17 +32,18 @@ def _image(block: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _effort(body: dict[str, Any]) -> str:
+def _effort(body: dict[str, Any], efforts: tuple[str, ...] = EFFORTS, default: str = "medium") -> str:
     want = (body.get("output_config") or {}).get("effort") or body.get("effort")
-    if want in EFFORTS:
+    if want in efforts:
         return want
-    if want == "max":
+    if want == "max" and "xhigh" in efforts:
         return "xhigh"
     thinking = body.get("thinking") or {}
+    effort = default
     if thinking.get("type") == "enabled":
         budget = int(thinking.get("budget_tokens") or 0)
-        return "low" if budget < 4096 else "medium" if budget < 16384 else "high"
-    return "medium"
+        effort = "low" if budget < 4096 else "medium" if budget < 16384 else "high"
+    return effort if effort in efforts else default
 
 
 def _blocks(content: Any) -> list[dict[str, Any]]:
@@ -74,7 +75,7 @@ def fold_system_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
     return out
 
 
-def to_responses(body: dict[str, Any], model: str) -> dict[str, Any]:
+def to_responses(body: dict[str, Any], model: str, route: Any = None) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     for m in body.get("messages") or []:
         role = m.get("role", "user")
@@ -129,7 +130,7 @@ def to_responses(body: dict[str, Any], model: str) -> dict[str, Any]:
         "input": items,
         "tools": tools,
         "parallel_tool_calls": True,
-        "reasoning": {"effort": _effort(body)},
+        "reasoning": {"effort": _effort(body, tuple(route.efforts), route.default_effort) if route else _effort(body)},
         "store": False,
         "stream": True,
     }

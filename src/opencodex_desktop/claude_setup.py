@@ -117,12 +117,22 @@ def apply_claude_config(cfg: Config, d: Discovery) -> None:
     opts = picker.setdefault("options", [])
     ms = s.setdefault("modelSettings", {})
     rows = _models(cfg, d)
+    efforts = {r.slug: r.default_effort for r in d.routes}
     for r in rows:
         big = r["ctx"] >= ONE_M
         opts.append({"model": r["slug"] + ("[1m]" if big else ""), "label": r["label"],
                      "description": f"{ui.fmt_tokens(r['ctx'])} context, {TAG}" if r["ctx"] else TAG})
+        settings: dict[str, Any] = {}
         if r["ctx"]:
-            ms[r["slug"]] = {"autoCompactWindow": int(r["ctx"] * 0.9), "_opencodexDesktop": True}
+            settings["autoCompactWindow"] = int(r["ctx"] * 0.9)
+        if r["slug"] in efforts:
+            settings["effortLevel"] = efforts[r["slug"]]
+        if settings:
+            # Collapse stale case-variant keys of the same slug instead of adding another one.
+            for k in [k for k in ms if k.lower() == r["slug"].lower()
+                      and isinstance(ms[k], dict) and ms[k].get("_opencodexDesktop")]:
+                del ms[k]
+            ms[r["slug"]] = {**settings, "_opencodexDesktop": True}
     if not ms:
         del s["modelSettings"]
     small = [r["slug"] for r in rows if r["ctx"] and r["ctx"] < 200_000]

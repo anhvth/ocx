@@ -32,7 +32,7 @@ def test_orphan_outputs_become_user_messages():
     assert "codex_apps_x" in b["input"][0]["content"][0]["text"]
     assert "id" not in b["input"][1]
     assert [t["type"] for t in b["tools"]] == ["function"]
-    assert b["reasoning"] == {"effort": "high"} and b["store"] is False
+    assert b["reasoning"] == {"effort": "medium"} and b["store"] is False  # unsupported xhigh -> default_effort
 
 
 def test_local_deepseek_v41_efforts(monkeypatch):
@@ -44,7 +44,58 @@ def test_local_deepseek_v41_efforts(monkeypatch):
     provider = config.ProviderCfg(name="local-vllm", base_url="http://localhost/v1", models_auto=True)
     route = discovery._discover_provider(provider)[0][0]
     assert route.efforts == ["low", "high", "xhigh", "max"] and route.default_effort == "high"
-    assert sanitize_request({"model": route.slug, "reasoning": {"effort": "medium"}}, route)["reasoning"] == {"effort": "max"}
+    assert sanitize_request({"model": route.slug, "reasoning": {"effort": "medium"}}, route)["reasoning"] == {"effort": "high"}
+    assert sanitize_request({"model": route.slug, "reasoning": {"effort": "high"}}, route)["reasoning"] == {"effort": "high"}
+
+
+def test_effort_snaps_to_route_default():
+    from opencodex_desktop.messages_adapter import to_responses
+    route = Route(slug="local-vllm/m", provider="local-vllm", upstream_model="m", base_url="http://x/v1",
+                  wire="responses", context_window=65536, context_source="discovered",
+                  efforts=["low", "high", "xhigh", "max"], default_effort="high")
+    assert sanitize_request({"reasoning": {"effort": "medium"}}, route)["reasoning"] == {"effort": "high"}
+    assert sanitize_request({"reasoning": {"effort": "high"}}, route)["reasoning"] == {"effort": "high"}
+    assert to_responses({"effort": "medium", "messages": []}, "m", route)["reasoning"] == {"effort": "high"}
+    assert to_responses({"output_config": {"effort": "high"}, "messages": []}, "m", route)["reasoning"] == {"effort": "high"}
+    # Without a route (real Claude / GPT models), today's mapping is unchanged.
+    assert to_responses({"effort": "medium", "messages": []}, "gpt-x")["reasoning"] == {"effort": "medium"}
+
+
+def test_claude_messages_effort_snap_and_native_verbatim(tmp_path, monkeypatch):
+    from aiohttp.test_utils import make_mocked_request
+    from opencodex_desktop import router as router_mod
+
+    monkeypatch.setattr(router_mod, "load_routes", lambda: [])
+    monkeypatch.setattr(router_mod, "router_token", lambda: "router-test")
+    cfg = config.Config(path=None, codex_home=tmp_path, listen_host="127.0.0.1", listen_port=0,
+                        provider_id="opencodex-desktop", openai_enabled=True, openai_include=[],
+                        default_model=None, providers=[config.ProviderCfg(
+                            name="local-vllm", base_url="http://x/v1", anthropic_url="http://x/v1")])
+    router = router_mod.Router(cfg)
+    router.routes = {"local-vllm/m": Route(slug="local-vllm/m", provider="local-vllm", upstream_model="m",
+                                           base_url="http://x/v1", wire="anthropic", context_window=65536,
+                                           context_source="discovered", efforts=["low", "high", "xhigh", "max"],
+                                           default_effort="high")}
+    seen = {}
+
+    async def stream(req, method, url, headers, data, label, model=None):
+        seen.update(json.loads(data))
+        return router_mod.web.json_response({"ok": True})
+
+    monkeypatch.setattr(router, "stream", stream)
+    req = make_mocked_request("POST", "/v1/messages")
+    body = {"model": "local-vllm/m", "effort": "medium", "output_config": {"effort": "medium"},
+            "messages": [{"role": "user", "content": "hi"}], "max_tokens": 16}
+    asyncio.run(router.claude_messages(req, "v1/messages", json.dumps(body).encode()))
+    assert seen["effort"] == "high" and seen["output_config"]["effort"] == "high"
+    assert seen["max_tokens"] == 16 and seen["messages"] == body["messages"]  # rest forwarded untouched
+    seen.clear()
+    native = {"model": "claude-sonnet-5-5", "effort": "medium", "messages": body["messages"]}
+    native_req = make_mocked_request("POST", "/v1/messages", headers={"Authorization": "Bearer claude-client-login"})
+    asyncio.run(router.claude_messages(native_req, "v1/messages", json.dumps(native).encode()))
+    assert seen == native  # real Anthropic gets the body verbatim
+
+
 
 
 def test_summary_envelope_roundtrip():
@@ -135,8 +186,15 @@ def test_claude_apply_and_restore(tmp_path, monkeypatch):
                                    other])
     other_route = Route(slug="other/m", provider="other", upstream_model="m", base_url="http://y/v1",
                         wire="chat", context_window=100_000, context_source="config")
+    route_low = Route(slug="alibaba/qwen", provider="alibaba", upstream_model="qwen", base_url="http://x/v1",
+                      wire="responses", context_window=1_000_000, context_source="config",
+                      efforts=["low", "high"], default_effort="low")
     d = Discovery(openai=OpenAIAuth(mode="chatgpt"), openai_models=[{"slug": "gpt-x", "context_window": 272_000}],
-                  routes=[ROUTE, other_route])
+                  routes=[route_low, other_route])
+    # A stale case-variant key of the same slug must not survive as a duplicate.
+    real = tmp_path / "_local" / "real.json"
+    real.write_text(json.dumps({**json.loads(real.read_text()),
+                                "modelSettings": {"Alibaba/Qwen": {"autoCompactWindow": 900_000, "_opencodexDesktop": True}}}))
     for _ in range(2):  # idempotent
         claude_setup.apply_claude_config(cfg, d)
     path = tmp_path / "claude" / "settings.json"
@@ -147,6 +205,9 @@ def test_claude_apply_and_restore(tmp_path, monkeypatch):
     assert s["env"]["ANTHROPIC_CUSTOM_HEADERS"] == f"x-opencodex-token: {config.router_token()}"
     assert [o["model"] for o in s["modelPicker"]["options"]] == ["mine", "gpt-x", "alibaba/qwen[1m]"]
     assert s["modelSettings"]["gpt-x"]["autoCompactWindow"] == 244_800
+    assert s["modelSettings"]["alibaba/qwen"]["effortLevel"] == "low"
+    assert [k for k in s["modelSettings"] if k.lower() == "alibaba/qwen"] == ["alibaba/qwen"]
+    assert "effortLevel" not in s["modelSettings"]["gpt-x"]
     lib = tmp_path / "desktop" / "configLibrary"
     meta = json.loads((lib / "_meta.json").read_text())
     assert meta["appliedId"] == claude_setup.PROFILE_ID and meta["previousAppliedId"] == "old"

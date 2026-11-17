@@ -273,6 +273,11 @@ class Router:
             route = self.routes[model]
             if count:
                 return web.json_response({"input_tokens": len(json.dumps(body)) // 4})
+            # Claude clients send effort levels the upstream may not accept; snap the same way as Responses.
+            for holder in (body, body.get("output_config")):
+                want = holder.get("effort") if isinstance(holder, dict) else None
+                if want and want not in route.efforts:
+                    holder["effort"] = route.default_effort
             return await self.claude_routed(req, body, route)
         if model.startswith("claude"):
             body["model"] = model
@@ -332,7 +337,7 @@ class Router:
                    "Authorization": f"Bearer {auth.access_token or auth.api_key}"}
         if auth.mode == "chatgpt" and auth.account_id:
             headers["ChatGPT-Account-ID"] = auth.account_id
-        payload = to_responses(body, model)
+        payload = to_responses(body, model, self.routes.get(model))
         url = f"{auth.upstream}/responses"
         start = time.monotonic()
         tr = Translator(model)
