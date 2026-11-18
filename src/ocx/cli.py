@@ -51,6 +51,14 @@ def cmd_update(config_path: str | None) -> int:
         ui.info(f"installed ocx {__version__} is newer than the published {latest}")
         return 0
     try:
+        cfg = load(config_path)
+    except ConfigError as exc:
+        ui.err(f"config error: {exc}")
+        return 2
+    try:
+        health = _health(cfg)
+        if health and health.get("service") in SERVICE_IDS:
+            _stop_router(cfg)
         subprocess.run(["uv", "tool", "install", "--force", "--refresh", UPSTREAM_PACKAGE], check=True)
         bin_dir = subprocess.check_output(["uv", "tool", "dir", "--bin"], text=True).strip()
         cmd = [str(Path(bin_dir) / "ocx")]

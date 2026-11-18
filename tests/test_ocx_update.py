@@ -15,7 +15,7 @@ from ocx import cli, router
     (None, None, None, None, 1),
 ])
 def test_update_installs_and_starts_published_nondowngrades(
-    monkeypatch, latest, install_code, config_path, start_code, expected,
+    tmp_path, monkeypatch, latest, install_code, config_path, start_code, expected,
 ):
     calls = []
 
@@ -34,6 +34,10 @@ def test_update_installs_and_starts_published_nondowngrades(
     monkeypatch.setattr(cli, "latest_version", lambda: latest)
     monkeypatch.setattr(cli.subprocess, "run", run)
     monkeypatch.setattr(cli.subprocess, "check_output", tool_bin)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_health", lambda cfg: None)
+    if config_path:
+        (tmp_path / config_path).write_text("{}\n")
     config_args = ["--config", config_path] if config_path else []
     assert cli.main([*config_args, "update"]) == expected
     wanted = []

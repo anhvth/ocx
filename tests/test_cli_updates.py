@@ -81,3 +81,25 @@ def test_restart_leaves_an_unmanaged_codex_server_to_its_owner(tmp_path, monkeyp
         cli.os.utime(catalog, (2_000_000_000, 2_000_000_000))
         cli._restart_stale_codex(cfg, catalog)
     assert "Reconnect the Codex SSH session" in capsys.readouterr().out
+
+
+def test_update_stops_running_router_before_replacing_package(tmp_path, monkeypatch):
+    yaml = tmp_path / "ocx.yaml"
+    yaml.write_text("listen: 127.0.0.1:19001\n")
+    monkeypatch.setattr(cli, "latest_version", lambda: cli.__version__)
+    monkeypatch.setattr(cli, "_health", lambda cfg: {"service": "ocx"})
+    calls = []
+    monkeypatch.setattr(cli, "_stop_router", lambda cfg: calls.append("stop"))
+    monkeypatch.setattr(cli.subprocess, "check_output", lambda *a, **k: str(tmp_path))
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        return cli.subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(cli.subprocess, "run", run)
+    assert cli.cmd_update(str(yaml)) == 0
+    assert calls == [
+        "stop",
+        ["uv", "tool", "install", "--force", "--refresh", cli.UPSTREAM_PACKAGE],
+        [str(tmp_path / "ocx"), "--config", str(yaml), "start"],
+    ]
