@@ -212,8 +212,9 @@ The YAML above controls the list; do not maintain a separate list in Pi.
 
 - Adds one `ocx` provider to `~/.pi/agent/models.json`, using the router's Responses API.
   Model names are the canonical slugs, with context, output limits and reasoning levels from discovery.
-- Leaves Pi's saved default provider, startup model, and picker scope under Pi's control. Use `/model`
-  to switch models; press Tab in the picker to view all providers if you have a scope set.
+- Leaves Pi's saved default provider, startup model, and picker scope under Pi's control. In `/model`,
+  highlight a model and press **Ctrl+S** to save it for new sessions. **Enter** switches only the current
+  session. Press Tab to view all providers if you have a scope set.
 - Honors `PI_CODING_AGENT_DIR`. `off` restores the previous provider entry from `ocx-backup.json`.
   On upgrade, OCX restores the previous picker scope only if it still matches OCX's old generated list.
 - Provider health checks synchronize Pi's list too. Restart Pi after model-list changes. GPT models

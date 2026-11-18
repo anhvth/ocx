@@ -177,7 +177,7 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     ui.info("Restart the Codex app to pick up the model list. The codex CLI attaches to a background")
     ui.info("daemon that keeps its old list: `codex app-server daemon restart` (closes open codex sessions).")
     ui.info("Claude Code (`claude`, `cl`) sees the new models in /model right away.")
-    ui.info("Pi: restart to refresh the model list; resumed sessions can switch with /model.")
+    ui.info("Pi: restart to refresh the model list. In /model, Enter switches for this session; Ctrl+S saves the default.")
     ui.info("Turn it off any time with: ocx off")
     return 0
 
