@@ -33,6 +33,7 @@ from .chat_adapter import from_chat, sse_events, to_chat
 from .config import ANTHROPIC_BASE, DEFAULT_PROVIDER_ID, TOKEN_HEADERS, Config, router_token
 from .messages_adapter import Translator, fold_system_messages, to_responses
 from .landing import render_landing
+from .updates import latest_version, version_parts
 from .usage import fetch_codex_usage
 from .token_usage import TokenUsage
 from .discovery import _is_loopback, load_routes, provider_headers, read_openai_auth
@@ -76,20 +77,38 @@ class Router:
         self.message_count = 0
         self.direct: aiohttp.ClientSession | None = None
         self.proxied: aiohttp.ClientSession | None = None
+        self.update_available: str | None = None
+        self.update_monitor: asyncio.Task | None = None
 
     async def on_startup(self, _app: web.Application) -> None:
         timeout = aiohttp.ClientTimeout(total=None, sock_connect=20, sock_read=900)
         self.direct = aiohttp.ClientSession(trust_env=False, timeout=timeout, auto_decompress=True)
         self.proxied = aiohttp.ClientSession(trust_env=True, timeout=timeout, auto_decompress=True)
+        self.update_monitor = asyncio.create_task(self.watch_updates())
         if (self.cfg.providers or self.cfg.openai_enabled) and HEALTH_INTERVAL > 0:
             self.monitor = asyncio.create_task(self.watch_providers())
 
     async def on_cleanup(self, _app: web.Application) -> None:
         if getattr(self, "monitor", None):
             self.monitor.cancel()
+        if self.update_monitor:
+            self.update_monitor.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.update_monitor
         for s in (self.direct, self.proxied):
             if s:
                 await s.close()
+
+    async def watch_updates(self) -> None:
+        await asyncio.sleep(5)  # Let the router start serving before checking GitHub.
+        while True:
+            latest = await asyncio.to_thread(latest_version)
+            if latest is not None:
+                available = latest if version_parts(latest) > version_parts(__version__) else None
+                if available and available != self.update_available:
+                    _log(f"⚠ ocx {available} is available; run `ocx update`")
+                self.update_available = available
+            await asyncio.sleep(24 * 60 * 60)
 
     async def watch_providers(self) -> None:
         """Re-discover periodically, including new GPT models and changed model metadata.
@@ -180,7 +199,8 @@ class Router:
         if "cf-connecting-ip" in req.headers:
             return web.Response(status=403)
         usage = await asyncio.to_thread(fetch_codex_usage, read_openai_auth(self.cfg.codex_home))
-        html_page = render_landing(__version__, self.cfg.base_url, self._groups(), usage, list(self.message_usage))
+        html_page = render_landing(__version__, self.cfg.base_url, self._groups(), usage, list(self.message_usage),
+                                   update_available=self.update_available)
         return web.Response(text=html_page, content_type="text/html", charset="utf-8")
 
     async def overview_api(self, req: web.Request) -> web.Response:
@@ -190,7 +210,8 @@ class Router:
         usage = await asyncio.to_thread(fetch_codex_usage, read_openai_auth(self.cfg.codex_home))
         return web.json_response({"version": __version__, "base_url": self.cfg.base_url,
                                   "groups": self._groups(), "usage": usage,
-                                  "messages": list(self.message_usage), "ts": time.time()})
+                                  "messages": list(self.message_usage), "ts": time.time(),
+                                  "update_available": self.update_available})
 
     def record_usage(self, capture: TokenUsage, status: int) -> None:
         self.message_count += 1

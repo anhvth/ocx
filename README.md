@@ -118,7 +118,6 @@ The dashboard and its read-only JSON are blocked through the public Claude tunne
 codex_home: [~/.codex]          # $CODEX_HOME wins; first existing entry otherwise
 listen: 127.0.0.1:11111
 openai: {enabled: true}         # GPT models from your Codex login
-# default_model: alibaba/qwen4-max
 
 anthropic: {}                   # claude-* from $ANTHROPIC_API_KEY; or set api_key/api_key_file below
 
@@ -206,15 +205,12 @@ The YAML above controls the list; do not maintain a separate list in Pi.
 
 - Adds one `ocx` provider to `~/.pi/agent/models.json`, using the router's Responses API.
   Model names are the canonical slugs, with context, output limits and reasoning levels from discovery.
-- Sets `enabledModels` to `ocx/*`, so `/model` defaults to a clean, project-managed list.
-  Pi's Tab key can still switch the picker to all providers; existing providers and logins are preserved.
-- Selects an available startup model (retains the current slug if available, otherwise the YAML default
-  or first discovered model). Resumed sessions retain their model: use `/model` to switch old sessions.
-- Honors `PI_CODING_AGENT_DIR`. Saves previous managed settings in `ocx-backup.json`
-  inside that directory; `off` restores them without reverting unrelated settings.
-- Provider health checks synchronize Pi's list too. Restart Pi after a model-list change to refresh
-  its scope (Pi resolves scoped patterns at startup). GPT models use the existing Codex login through
-  the local router.
+- Leaves Pi's saved default provider, startup model, and picker scope under Pi's control. Use `/model`
+  to switch models; press Tab in the picker to view all providers if you have a scope set.
+- Honors `PI_CODING_AGENT_DIR`. `off` restores the previous provider entry from `ocx-backup.json`.
+  On upgrade, OCX restores the previous picker scope only if it still matches OCX's old generated list.
+- Provider health checks synchronize Pi's list too. Restart Pi after model-list changes. GPT models
+  use the existing Codex login through the local router.
 
 Pi reads the local router token at request time; upstream API keys are not copied into Pi's config.
 Unknown maximum output limits use Pi's conservative 16k default. Pricing is not imported, so Pi's

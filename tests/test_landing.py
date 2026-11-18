@@ -133,6 +133,10 @@ def test_landing_shows_usage_without_leaking_token(tmp_path, monkeypatch):
 
 
 def test_overview_api_is_public_json_without_secrets(tmp_path, monkeypatch):
+    async def fake_watch_updates(instance):
+        instance.update_available = "2.0.0"
+
+    monkeypatch.setattr(router.Router, "watch_updates", fake_watch_updates)
     catalog = tmp_path / "catalog.json"; catalog.write_text('{"models": []}')
     monkeypatch.setattr(codex_setup, "CATALOG", catalog)
     monkeypatch.setattr(router, "router_token", lambda: "test-only-router-token")
@@ -151,7 +155,10 @@ def test_overview_api_is_public_json_without_secrets(tmp_path, monkeypatch):
                     assert r.status == 200 and r.content_type == "application/json"
                     txt = await r.text(); d = json.loads(txt)
                     assert "groups" in d and d["usage"]["plan"] == "pro"
+                    assert d["update_available"] == "2.0.0"
                     assert "test-only-router-token" not in txt
+                async with s.get(f"http://127.0.0.1:{port}/") as r:
+                    assert 'role="status">OCX 2.0.0 is available. Run ocx update.' in await r.text()
                 async with s.get(f"http://127.0.0.1:{port}/api/overview", headers={"cf-connecting-ip": "1.2.3.4"}) as r:
                     assert r.status == 403
         finally:

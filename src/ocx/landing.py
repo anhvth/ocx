@@ -169,6 +169,7 @@ main{width:min(1180px,calc(100% - 32px));margin:0 auto;padding:52px 0 72px}
 h1{margin:0 0 14px;font-size:clamp(2.1rem,5vw,3.4rem);line-height:1.04;letter-spacing:-.045em;font-weight:850}
 h1 .grad{background:linear-gradient(90deg,var(--green),var(--cyan) 55%,var(--blue));-webkit-background-clip:text;background-clip:text;color:transparent}
 .hero p{margin:0;color:var(--muted);font-size:clamp(1rem,2vw,1.13rem);line-height:1.65}
+.hero .update-status{min-height:1.65em;color:var(--amber)}
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:26px 0 8px}
 .stat{border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,var(--surface),rgba(16,26,44,.6));padding:14px 16px;position:relative;overflow:hidden}
 .stat::after{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:linear-gradient(90deg,var(--green),var(--blue),var(--magenta))}
@@ -249,7 +250,11 @@ _JS = """
   function usageInner(u){if(!u)return'<p class="note">Codex usage unavailable (not signed in or endpoint unreachable).</p>';var plan=(u.plan||'unknown');plan=plan.charAt(0).toUpperCase()+plan.slice(1);var out='<div class="usage-source">Usage source: Your '+esc(plan)+' plan</div>';(u.windows||[]).forEach(function(w){var left=w.left|0;var r=resetLabel(w.reset_at,w.seconds|0);var tone=left>40?'ok':(left>15?'warn':'low');out+='<div class="usage-row"><div class="usage-top"><span>'+esc(w.label||'Limit')+'</span><span class="pct">'+left+'% left</span></div><div class="bar '+tone+'"><span style="width:'+left+'%"></span></div>'+(r?'<div class="usage-reset">Resets '+esc(r)+'</div>':'')+'</div>';});if(u.credits)out+='<div class="usage-kv"><span>Credits</span><strong>'+esc(u.credits)+'</strong></div>';if(u.resets)out+='<div class="usage-kv"><span>Full reset</span><strong>'+(u.resets|0)+' remaining</strong></div>';return out;}
   function set(id,v){var e=document.getElementById(id);if(e&&v!=null)e.textContent=v;}
   function messageRows(ms){if(!ms.length)return'<tr><td class="empty" colspan="7">No responses recorded since router startup.</td></tr>';return ms.map(function(m){var id=m.response_id||'—';var out='<tr><td>'+esc(new Date(m.at*1000).toLocaleTimeString())+'</td><td><code>'+esc(m.model)+'</code></td><td><code title="'+esc(id)+'">#'+esc(m.sequence)+' · '+esc(id)+'</code></td>';['input_tokens','cached_tokens','output_tokens'].forEach(function(k){out+=m[k]==null?'<td class="num" title="Not reported by upstream">—</td>':'<td class="num">'+esc(m[k].toLocaleString())+'</td>';});return out+'<td>'+esc(m.http_status)+' · '+esc(m.status)+'</td></tr>';}).join('');}
-  function apply(d){ts=Date.now();ago();if(d.messages){var mb=document.getElementById('message-rows');if(mb)mb.innerHTML=messageRows(d.messages);}if(d.groups){var n=0;d.groups.forEach(function(g){n+=(g.models||[]).length;});set('stat-models',n);set('stat-providers',d.groups.length);}if(d.usage){set('stat-plan',(d.usage.plan||'—').toUpperCase());set('stat-credits',(d.usage.credits||'—').replace(' credits',''));var ub=document.getElementById('usage-body');if(ub)ub.innerHTML=usageInner(d.usage);}var dot=document.getElementById('status-dot');if(dot&&!reduce){dot.classList.remove('pulse');void dot.offsetWidth;dot.classList.add('pulse');}}
+  function apply(d){
+    var notice=document.getElementById('update-status');
+    var text=d.update_available?'OCX '+d.update_available+' is available. Run ocx update.':'';
+    if(notice&&notice.textContent!==text)notice.textContent=text;
+    ts=Date.now();ago();if(d.messages){var mb=document.getElementById('message-rows');if(mb)mb.innerHTML=messageRows(d.messages);}if(d.groups){var n=0;d.groups.forEach(function(g){n+=(g.models||[]).length;});set('stat-models',n);set('stat-providers',d.groups.length);}if(d.usage){set('stat-plan',(d.usage.plan||'—').toUpperCase());set('stat-credits',(d.usage.credits||'—').replace(' credits',''));var ub=document.getElementById('usage-body');if(ub)ub.innerHTML=usageInner(d.usage);}var dot=document.getElementById('status-dot');if(dot&&!reduce){dot.classList.remove('pulse');void dot.offsetWidth;dot.classList.add('pulse');}}
   function refresh(){var b=document.getElementById('refresh');if(b)b.classList.add('spinning');fetch('/api/overview',{headers:{'Accept':'application/json'}}).then(function(r){if(!r.ok)throw 0;return r.json();}).then(apply).catch(function(){}).finally(function(){if(b)setTimeout(function(){b.classList.remove('spinning');},400);});}
   var rb=document.getElementById('refresh');if(rb)rb.addEventListener('click',refresh);
   setInterval(refresh,30000);
@@ -258,7 +263,8 @@ _JS = """
 
 
 def render_landing(version: str, base_url: str, groups: list[dict], usage: dict | None = None,
-                   messages: list[dict] | None = None) -> str:
+                   messages: list[dict] | None = None, *, update_available: str | None = None) -> str:
+    update_text = f"OCX {update_available} is available. Run ocx update." if update_available else ""
     total = sum(len(g.get("models", [])) for g in groups)
     plan = (usage or {}).get("plan") or "—"
     credits = ((usage or {}).get("credits") or "—").replace(" credits", "")
@@ -288,6 +294,7 @@ def render_landing(version: str, base_url: str, groups: list[dict], usage: dict 
     <span class="eyebrow">Local model router</span>
     <h1>One control plane for <span class="grad">every coding client.</span></h1>
     <p>A single, centralized model list for Codex, Claude and Pi — routed locally, with live usage and credits at a glance.</p>
+    <p class="update-status" id="update-status" role="status">{_esc(update_text)}</p>
     <div class="stats" role="list">
       <div class="stat" role="listitem"><div class="k">Models</div><div class="v" id="stat-models">{total}</div></div>
       <div class="stat" role="listitem"><div class="k">Providers</div><div class="v" id="stat-providers">{len(groups)}</div></div>

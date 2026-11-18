@@ -3,18 +3,18 @@ import json
 
 import pytest
 
-from ocx import cli, config, discovery
+from ocx import cli, config, discovery, updates
 
 
 @pytest.mark.parametrize("version, notice", [("0.4.10", True), ("0.4.2", False), (None, False)])
 def test_package_update_check(monkeypatch, capsys, version, notice):
     def fetch(url, timeout):
-        assert url == cli.UPSTREAM_VERSION and timeout == 2
+        assert url == updates.UPSTREAM_VERSION and timeout == 2
         if version is None:
             raise TimeoutError
         return io.BytesIO(f'[project]\nversion = "{version}"\n'.encode())
 
-    monkeypatch.setattr(cli, "urlopen", fetch)
+    monkeypatch.setattr(updates, "urlopen", fetch)
     monkeypatch.setattr(cli, "__version__", "0.4.3")
     cli._check_update()
     assert ("is available" in capsys.readouterr().out) == notice
@@ -36,7 +36,7 @@ def test_status_checks_updates_and_explains_gpt_catalog_gaps(tmp_path, monkeypat
         return [{"slug": s} for s in ("gpt-old", "gpt-new", "gpt-beta", "gpt-excluded")]
 
     monkeypatch.setattr(discovery, "_openai_models", models)
-    monkeypatch.setattr(cli, "urlopen", lambda *args, **kwargs: io.BytesIO(b'[project]\nversion = "9.0.0"\n'))
+    monkeypatch.setattr(updates, "urlopen", lambda *args, **kwargs: io.BytesIO(b'[project]\nversion = "9.0.0"\n'))
     assert cli.main(["--config", str(yaml), "status"]) == 0
     out = capsys.readouterr().out
     assert "9.0.0 is available" in out

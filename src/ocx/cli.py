@@ -19,50 +19,31 @@ import sys
 import time
 from dataclasses import replace
 from pathlib import Path
-from urllib.request import urlopen
 
 import tomlkit
-from tomlkit.exceptions import ParseError
 
 from . import __version__, ui
 from .config import DEFAULT_CONFIG, LEGACY_CONFIG, SERVICE_IDS, STATE_DIR, Config, ConfigError, load
+from .updates import latest_version, version_parts
 
 PIDFILE = STATE_DIR / "router.pid"
 LOGFILE = STATE_DIR / "router.log"
 EXAMPLE = Path(__file__).with_name("example_config.yaml")
-UPSTREAM_VERSION = "https://raw.githubusercontent.com/anhvth/opencodex-desktop/main/pyproject.toml"
 UPSTREAM_PACKAGE = "git+https://github.com/anhvth/opencodex-desktop.git@main"
 
 
-def _version_parts(version: str) -> tuple[int, ...]:
-    return tuple(map(int, version.split(".")))
-
-
-def _latest_version() -> str | None:
-    try:
-        with urlopen(UPSTREAM_VERSION, timeout=2) as response:
-            version = tomlkit.parse(response.read(4096).decode())["project"]["version"]
-        if isinstance(version, str) and version.count(".") == 2 and all(
-            part.isdecimal() for part in version.split(".")
-        ):
-            return version
-    except (OSError, ParseError, KeyError, TypeError, ValueError):
-        pass
-    return None
-
-
 def _check_update() -> None:
-    latest = _latest_version()
-    if latest and _version_parts(latest) > _version_parts(__version__):
+    latest = latest_version()
+    if latest and version_parts(latest) > version_parts(__version__):
         ui.warn(f"ocx {latest} is available (installed: {__version__}); run `ocx update`")
 
 
 def cmd_update(config_path: str | None) -> int:
-    latest = _latest_version()
+    latest = latest_version()
     if latest is None:
         ui.err("could not read the published OCX version; check your connection to GitHub")
         return 1
-    if _version_parts(latest) < _version_parts(__version__):
+    if version_parts(latest) < version_parts(__version__):
         ui.info(f"installed ocx {__version__} is newer than the published {latest}")
         return 0
     try:
