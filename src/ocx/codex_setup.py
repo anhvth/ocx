@@ -18,7 +18,7 @@ from typing import Any
 import tomlkit
 
 from . import ui
-from .config import STATE_DIR, Config
+from .config import DEFAULT_STATE_DIR, LEGACY_PROVIDER_ID, LEGACY_STATE_DIR, STATE_DIR, Config
 from .discovery import Discovery, Route
 
 EFFORT_TEXT = {
@@ -55,7 +55,7 @@ def _custom_entry(template: dict[str, Any], r: Route, priority: int) -> dict[str
     e.update({
         "slug": r.slug,
         "display_name": r.display_name or r.slug,
-        "description": f"{r.provider} via opencodex-desktop",
+        "description": f"{r.provider} via ocx",
         "context_window": r.context_window,
         "max_context_window": r.context_window,
         "auto_compact_token_limit": int(r.context_window * 0.9),
@@ -104,7 +104,7 @@ def _load_toml(path: Path) -> tomlkit.TOMLDocument:
 def _backup(path: Path) -> Path | None:
     if not path.exists():
         return None
-    dst = path.with_name(f"config.toml.bak-opencodex-desktop-{time.strftime('%Y%m%d-%H%M%S')}")
+    dst = path.with_name(f"config.toml.bak-ocx-{time.strftime('%Y%m%d-%H%M%S')}")
     shutil.copy2(path, dst)
     return dst
 
@@ -120,13 +120,18 @@ def apply_codex_config(cfg: Config, d: Discovery, catalog_path: Path) -> None:
     if providers is None:
         providers = tomlkit.table(is_super_table=True)
         doc["model_providers"] = providers
-    block = tomlkit.table()
-    block["name"] = "opencodex-desktop router"
-    block["base_url"] = cfg.base_url
-    block["wire_api"] = "responses"
-    block["requires_openai_auth"] = d.openai.mode == "chatgpt"
-    block["supports_websockets"] = False
-    providers[cfg.provider_id] = block
+    ids = [cfg.provider_id]
+    if LEGACY_PROVIDER_ID != cfg.provider_id and LEGACY_PROVIDER_ID in providers:
+        ids.append(LEGACY_PROVIDER_ID)  # Resumed Codex threads still use the stored provider ID.
+    for provider_id in ids:
+        if provider_id not in providers:
+            providers[provider_id] = tomlkit.table()
+        block = providers[provider_id]
+        block["name"] = "ocx router"
+        block["base_url"] = cfg.base_url
+        block["wire_api"] = "responses"
+        block["requires_openai_auth"] = d.openai.mode == "chatgpt"
+        block["supports_websockets"] = False
 
     slugs = [m["slug"] for m in d.openai_models] + [r.slug for r in d.routes]
     current = doc.get("model")
@@ -157,15 +162,19 @@ def restore_codex_config(cfg: Config, routed_slugs: set[str] | None = None) -> N
         return
     doc = _load_toml(path)
     changed = False
-    if doc.get("model_provider") == cfg.provider_id:
+    provider_ids = {cfg.provider_id, LEGACY_PROVIDER_ID}
+    if doc.get("model_provider") in provider_ids:
         del doc["model_provider"]
         changed = True
-    if str(doc.get("model_catalog_json", "")).startswith(str(STATE_DIR)):
+    if doc.get("model_catalog_json") in {
+        str(p / CATALOG.name) for p in (STATE_DIR, DEFAULT_STATE_DIR, LEGACY_STATE_DIR)
+    }:
         del doc["model_catalog_json"]
         changed = True
     providers = doc.get("model_providers")
-    if providers is not None and cfg.provider_id in providers:
-        del providers[cfg.provider_id]
+    if providers is not None and (managed := provider_ids.intersection(providers)):
+        for provider_id in managed:
+            del providers[provider_id]
         if not providers:
             del doc["model_providers"]
         changed = True
@@ -174,9 +183,9 @@ def restore_codex_config(cfg: Config, routed_slugs: set[str] | None = None) -> N
         del doc["model"]
         changed = True
     if not changed:
-        ui.ok(f"{path} has no opencodex-desktop settings")
+        ui.ok(f"{path} has no ocx settings")
         return
     bak = _backup(path)
     path.write_text(tomlkit.dumps(doc))
-    ui.ok(f"removed opencodex-desktop settings from {path} (backup: {bak.name if bak else '-'})")
+    ui.ok(f"removed ocx settings from {path} (backup: {bak.name if bak else '-'})")
     ui.info("Codex now uses its built-in OpenAI provider; restart the Codex app to apply.")

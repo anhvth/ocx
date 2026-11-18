@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 import tomlkit
 
-from opencodex_desktop import claude_setup, codex_setup, config, tunnel
-from opencodex_desktop.anthropic_adapter import from_messages, to_messages
-from opencodex_desktop.discovery import Discovery, OpenAIAuth, Route, provider_headers
-from opencodex_desktop.transforms import decode_summary, encode_summary, sanitize_request
+from ocx import claude_setup, codex_setup, config, tunnel
+from ocx.anthropic_adapter import from_messages, to_messages
+from ocx.discovery import Discovery, OpenAIAuth, Route, provider_headers
+from ocx.transforms import decode_summary, encode_summary, sanitize_request
 
 ROUTE = Route(slug="alibaba/qwen", provider="alibaba", upstream_model="qwen", base_url="http://x/v1",
               wire="responses", context_window=1_000_000, context_source="config")
@@ -39,14 +39,14 @@ def test_orphan_outputs_become_user_messages():
 @pytest.mark.parametrize("gateway", [False, True])
 def test_openai_drops_foreign_reasoning(tmp_path, monkeypatch, tail, gateway):
     from aiohttp.test_utils import make_mocked_request
-    from opencodex_desktop import router as router_mod
+    from ocx import router as router_mod
 
     monkeypatch.setattr(router_mod, "load_routes", lambda: [])
     monkeypatch.setattr(router_mod, "router_token", lambda: "router-test")
     monkeypatch.setattr(router_mod, "read_openai_auth", lambda _: OpenAIAuth(
         mode="chatgpt", access_token="openai-test", upstream="http://upstream/v1"))
     cfg = config.Config(path=None, codex_home=tmp_path, listen_host="127.0.0.1", listen_port=0,
-                        provider_id="opencodex-desktop", openai_enabled=True, openai_include=[],
+                        provider_id="ocx", openai_enabled=True, openai_include=[],
                         default_model=None, providers=[])
     router = router_mod.Router(cfg)
     native = {"type": "reasoning", "id": "rs_native", "encrypted_content": "opaque", "summary": []}
@@ -80,7 +80,7 @@ def test_openai_drops_foreign_reasoning(tmp_path, monkeypatch, tail, gateway):
 
 
 def test_local_deepseek_v41_efforts(monkeypatch):
-    from opencodex_desktop import discovery
+    from ocx import discovery
 
     model = "deepseek-ai/DeepSeek-V4.1-Flash-1017"
     monkeypatch.setattr(discovery, "http_json", lambda *a, **k: (200, {"data": [{"id": model, "max_model_len": 65536}]}))
@@ -93,7 +93,7 @@ def test_local_deepseek_v41_efforts(monkeypatch):
 
 
 def test_effort_snaps_to_route_default():
-    from opencodex_desktop.messages_adapter import to_responses
+    from ocx.messages_adapter import to_responses
     route = Route(slug="local-vllm/m", provider="local-vllm", upstream_model="m", base_url="http://x/v1",
                   wire="responses", context_window=65536, context_source="discovered",
                   efforts=["low", "high", "xhigh", "max"], default_effort="high")
@@ -107,12 +107,12 @@ def test_effort_snaps_to_route_default():
 
 def test_claude_messages_effort_snap_and_native_verbatim(tmp_path, monkeypatch):
     from aiohttp.test_utils import make_mocked_request
-    from opencodex_desktop import router as router_mod
+    from ocx import router as router_mod
 
     monkeypatch.setattr(router_mod, "load_routes", lambda: [])
     monkeypatch.setattr(router_mod, "router_token", lambda: "router-test")
     cfg = config.Config(path=None, codex_home=tmp_path, listen_host="127.0.0.1", listen_port=0,
-                        provider_id="opencodex-desktop", openai_enabled=True, openai_include=[],
+                        provider_id="ocx", openai_enabled=True, openai_include=[],
                         default_model=None, providers=[config.ProviderCfg(
                             name="local-vllm", base_url="http://x/v1", anthropic_url="http://x/v1")])
     router = router_mod.Router(cfg)
@@ -174,13 +174,13 @@ def test_apply_and_restore(tmp_path, monkeypatch):
     home.mkdir()
     (home / "config.toml").write_text('# mine\nmodel = "old"\n\n[projects."/x"]\ntrust_level = "trusted"\n')
     cfg = config.Config(path=None, codex_home=home, listen_host="127.0.0.1", listen_port=11111,
-                        provider_id="opencodex-desktop", openai_enabled=True, openai_include=[],
+                        provider_id="ocx", openai_enabled=True, openai_include=[],
                         default_model=None, providers=[])
     d = Discovery(openai=OpenAIAuth(mode="chatgpt"), openai_models=[{"slug": "gpt-x"}], routes=[ROUTE])
     codex_setup.apply_codex_config(cfg, d, tmp_path / "cat.json")
     doc = tomlkit.parse((home / "config.toml").read_text())
-    assert doc["model_provider"] == "opencodex-desktop" and doc["model"] == "gpt-x"
-    assert doc["model_providers"]["opencodex-desktop"]["requires_openai_auth"] is True
+    assert doc["model_provider"] == "ocx" and doc["model"] == "gpt-x"
+    assert doc["model_providers"]["ocx"]["requires_openai_auth"] is True
     assert doc["projects"]["/x"]["trust_level"] == "trusted"
     assert "# mine" in (home / "config.toml").read_text()
     # the top-level keys must stay above the first table
@@ -225,7 +225,7 @@ def test_claude_apply_and_restore(tmp_path, monkeypatch):
         {"appliedId": "old", "entries": [{"id": "old", "name": "Old"}]}))
     other = config.ProviderCfg(name="other", base_url="http://y/v1")
     cfg = config.Config(path=None, codex_home=tmp_path, listen_host="127.0.0.1", listen_port=11111,
-                        provider_id="opencodex-desktop", openai_enabled=True, openai_include=[], default_model=None,
+                        provider_id="ocx", openai_enabled=True, openai_include=[], default_model=None,
                         providers=[config.ProviderCfg(name="alibaba", base_url="http://x/v1", anthropic_url="http://x/a"),
                                    other])
     other_route = Route(slug="other/m", provider="other", upstream_model="m", base_url="http://y/v1",
@@ -246,7 +246,7 @@ def test_claude_apply_and_restore(tmp_path, monkeypatch):
     s = json.loads(path.read_text())
     assert s["theme"] == "dark" and s["env"]["FOO"] == "1"
     assert s["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:11111"
-    assert s["env"]["ANTHROPIC_CUSTOM_HEADERS"] == f"x-opencodex-token: {config.router_token()}"
+    assert s["env"]["ANTHROPIC_CUSTOM_HEADERS"] == f"x-ocx-token: {config.router_token()}"
     assert [o["model"] for o in s["modelPicker"]["options"]] == ["mine", "gpt-x", "alibaba/qwen[1m]"]
     assert s["modelSettings"]["gpt-x"]["autoCompactWindow"] == 244_800
     assert s["modelSettings"]["alibaba/qwen"]["effortLevel"] == "low"
@@ -313,7 +313,7 @@ def test_anthropic_headers_and_wire():
     h = provider_headers(p)
     assert h["x-api-key"] == "sk-ant-x" and h["anthropic-version"] == "2023-06-01"
     assert "authorization" not in h
-    from opencodex_desktop.discovery import _detect_wire
+    from ocx.discovery import _detect_wire
     p.wire_api = None
     assert _detect_wire(p, "claude-x", {}) == "anthropic"  # no probe needed
 
@@ -388,7 +388,7 @@ def test_anthropic_from_messages():
 
 def test_anthropic_end_to_end(tmp_path, monkeypatch):
     """start-style discovery + a Responses request through the router against a mock Anthropic API."""
-    from opencodex_desktop import discovery, router as router_mod
+    from ocx import discovery, router as router_mod
 
     seen = {}
 
@@ -505,7 +505,7 @@ def test_codex_internal_items_become_text():
 
 
 def test_messages_to_responses_and_back():
-    from opencodex_desktop.messages_adapter import Translator, to_responses
+    from ocx.messages_adapter import Translator, to_responses
     body = {"model": "gpt-x", "system": [{"type": "text", "text": "be brief"}], "stream": True,
             "thinking": {"type": "enabled", "budget_tokens": 20000},
             "tools": [{"name": "Bash", "description": "run", "input_schema": {"type": "object"}},
@@ -545,7 +545,7 @@ def test_messages_to_responses_and_back():
 
 
 def test_fold_system_messages():
-    from opencodex_desktop.messages_adapter import fold_system_messages
+    from ocx.messages_adapter import fold_system_messages
     msgs = [{"role": "system", "content": "first"}, {"role": "user", "content": "hi"},
             {"role": "assistant", "content": "yo"}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t"}]},
             {"role": "system", "content": [{"type": "text", "text": "tools changed"}]}]
@@ -556,7 +556,7 @@ def test_fold_system_messages():
 
 
 def test_context_caps(tmp_path, monkeypatch):
-    from opencodex_desktop import discovery
+    from ocx import discovery
     monkeypatch.setattr(discovery, "http_json", lambda *a, **k: (503, {}))
     monkeypatch.delenv("CODEX_HOME", raising=False)
     home = tmp_path / "codex"

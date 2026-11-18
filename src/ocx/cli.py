@@ -1,10 +1,11 @@
-"""opencodex-desktop: one command to put custom models into Codex (Desktop app + CLI).
+"""ocx: one command to put custom models into Codex (Desktop app + CLI).
 
-  opencodex-desktop            same as `start`
-  opencodex-desktop start      discover models, write Codex config, (re)start the router
-  opencodex-desktop off        stop the router and put Codex back to its defaults
-  opencodex-desktop status     what is running and which models Codex sees
-  opencodex-desktop init       write an example config to ~/.config/opencodex-desktop/config.yaml
+  ocx            same as `start`
+  ocx start      discover models, write Codex config, (re)start the router
+  ocx off        stop the router and put Codex back to its defaults
+  ocx status     what is running and which models Codex sees
+  ocx init       write an example config to ~/.config/ocx/config.yaml
+  ocx update     install the current published version
 """
 
 from __future__ import annotations
@@ -16,14 +17,63 @@ import signal
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
+from urllib.request import urlopen
+
+import tomlkit
+from tomlkit.exceptions import ParseError
 
 from . import __version__, ui
-from .config import DEFAULT_CONFIG, STATE_DIR, Config, ConfigError, load
+from .config import DEFAULT_CONFIG, LEGACY_CONFIG, SERVICE_IDS, STATE_DIR, Config, ConfigError, load
 
 PIDFILE = STATE_DIR / "router.pid"
 LOGFILE = STATE_DIR / "router.log"
 EXAMPLE = Path(__file__).with_name("example_config.yaml")
+UPSTREAM_VERSION = "https://raw.githubusercontent.com/anhvth/opencodex-desktop/main/pyproject.toml"
+UPSTREAM_PACKAGE = "git+https://github.com/anhvth/opencodex-desktop.git@main"
+
+
+def _version_parts(version: str) -> tuple[int, ...]:
+    return tuple(map(int, version.split(".")))
+
+
+def _latest_version() -> str | None:
+    try:
+        with urlopen(UPSTREAM_VERSION, timeout=2) as response:
+            version = tomlkit.parse(response.read(4096).decode())["project"]["version"]
+        if isinstance(version, str) and version.count(".") == 2 and all(
+            part.isdecimal() for part in version.split(".")
+        ):
+            return version
+    except (OSError, ParseError, KeyError, TypeError, ValueError):
+        pass
+    return None
+
+
+def _check_update() -> None:
+    latest = _latest_version()
+    if latest and _version_parts(latest) > _version_parts(__version__):
+        ui.warn(f"ocx {latest} is available (installed: {__version__}); run `ocx update`")
+
+
+def cmd_update() -> int:
+    latest = _latest_version()
+    if latest is None:
+        ui.err("could not read the published OCX version; check your connection to GitHub")
+        return 1
+    if _version_parts(latest) < _version_parts(__version__):
+        ui.info(f"installed ocx {__version__} is newer than the published {latest}")
+        return 0
+    try:
+        result = subprocess.run(["uv", "tool", "install", "--force", "--refresh", UPSTREAM_PACKAGE])
+    except OSError as exc:
+        ui.err(f"could not run uv: {exc}")
+        return 1
+    if result.returncode:
+        return result.returncode
+    ui.ok("OCX installed; run `ocx start` to load the update into the router")
+    return 0
 
 
 def _health(cfg: Config, timeout: float = 2) -> dict | None:
@@ -52,9 +102,11 @@ def _read_pid() -> int | None:
 
 def _stop_router(cfg: Config, quiet: bool = False) -> bool:
     h = _health(cfg)
-    pid = (h or {}).get("pid") if (h or {}).get("service") == "opencodex-desktop" else None
+    if h is not None and h.get("service") not in SERVICE_IDS:
+        return False
+    pid = h.get("pid") if h else None
     pid = pid or _read_pid()
-    if not pid or not _pid_alive(pid):
+    if type(pid) is not int or pid <= 1 or not _pid_alive(pid):
         PIDFILE.unlink(missing_ok=True)
         if not quiet:
             ui.ok("router is not running")
@@ -74,7 +126,7 @@ def _stop_router(cfg: Config, quiet: bool = False) -> bool:
 
 def _spawn_router(cfg: Config) -> int:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, "-m", "opencodex_desktop"]
+    cmd = [sys.executable, "-m", "ocx"]
     if cfg.path:
         cmd += ["--config", str(cfg.path)]
     cmd.append("serve")
@@ -87,7 +139,7 @@ def _spawn_router(cfg: Config) -> int:
         if proc.poll() is not None:
             break
         h = _health(cfg, timeout=1)
-        if h and h.get("service") == "opencodex-desktop":
+        if h and h.get("service") in SERVICE_IDS and h.get("pid") == proc.pid:
             return proc.pid
         time.sleep(0.1)
     tail = LOGFILE.read_text(errors="replace").splitlines()[-15:]
@@ -99,10 +151,10 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     from .codex_setup import apply_codex_config, build_catalog, write_catalog
     from .discovery import discover, save_routes
 
-    ui.head(f"opencodex-desktop {__version__}")
-    ui.info(f"config: {cfg.path or f'(none; {DEFAULT_CONFIG} not found -> ChatGPT models only; run `opencodex-desktop init`)'}")
+    ui.head(f"ocx {__version__}")
+    ui.info(f"config: {cfg.path or f'(none; {DEFAULT_CONFIG} not found -> ChatGPT models only; run `ocx init`)'}")
     h = _health(cfg)
-    if h and h.get("service") != "opencodex-desktop":
+    if h and h.get("service") not in SERVICE_IDS:
         ui.err(f"port {cfg.listen_port} is used by another program; set `listen:` in the config to a free port")
         return 1
 
@@ -141,7 +193,7 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     ui.info("daemon that keeps its old list: `codex app-server daemon restart` (closes open codex sessions).")
     ui.info("Claude Code (`claude`, `cl`) sees the new models in /model right away.")
     ui.info("Pi: restart to refresh the scoped /model list; resumed sessions can switch with /model.")
-    ui.info("Turn it off any time with: opencodex-desktop off")
+    ui.info("Turn it off any time with: ocx off")
     return 0
 
 
@@ -149,7 +201,7 @@ def cmd_off(cfg: Config, args: argparse.Namespace) -> int:
     from .claude_setup import restore_claude_config
     from .codex_setup import restore_codex_config
     from .discovery import load_routes
-    ui.head("opencodex-desktop off")
+    ui.head("ocx off")
     _stop_router(cfg)
     restore_codex_config(cfg, {r.slug for r in load_routes()})
     restore_claude_config(cfg)
@@ -163,30 +215,45 @@ def cmd_stop(cfg: Config, args: argparse.Namespace) -> int:
     _stop_router(cfg)
     if tunnel.stop():
         ui.ok("closed the Claude app tunnel")
-    ui.warn("Codex config still points at the router; run `opencodex-desktop off` to go back to defaults")
+    ui.warn("Codex config still points at the router; run `ocx off` to go back to defaults")
     return 0
 
 
 def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
-    import tomlkit
-    from .discovery import load_routes, read_openai_auth
-    ui.head(f"opencodex-desktop {__version__}")
+    from .discovery import _openai_models, load_routes, read_openai_auth
+    ui.head(f"ocx {__version__}")
     ui.info(f"config: {cfg.path or '(none)'}   codex home: {cfg.codex_home}")
     auth = read_openai_auth(cfg.codex_home)
     (ui.ok if auth.mode != "none" else ui.warn)(f"Codex login: {auth.mode}" + (f" ({auth.email})" if auth.email else ""))
     h = _health(cfg)
-    if h and h.get("service") == "opencodex-desktop":
+    if h and h.get("service") in SERVICE_IDS:
         ui.ok(f"router up on {cfg.base_url} (pid {h.get('pid')})")
     elif h:
         ui.err(f"port {cfg.listen_port} is used by another program")
     else:
-        ui.warn("router is not running (run `opencodex-desktop start`)")
+        ui.warn("router is not running (run `ocx start`)")
     path = cfg.codex_home / "config.toml"
     doc = tomlkit.parse(path.read_text()) if path.exists() else {}
-    if doc.get("model_provider") == cfg.provider_id:
+    if doc.get("model_provider") in (cfg.provider_id, *SERVICE_IDS):
         ui.ok(f"Codex uses the router (model: {doc.get('model', '-')})")
     else:
         ui.info(f"Codex is on its default provider ({doc.get('model_provider', 'openai')}); router is off for Codex")
+    if cfg.openai_enabled and auth.mode != "none":
+        available = {m["slug"] for m in _openai_models(replace(cfg, openai_include=[]), auth)}
+        allowed = available & set(cfg.openai_include) if cfg.openai_include else available
+        listed = set()
+        if doc.get("model_catalog_json"):
+            try:
+                catalog = json.loads(Path(doc["model_catalog_json"]).read_text())
+                listed = {m["slug"] for m in catalog["models"]}
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+        ui.info("GPT in configured catalog: " + (", ".join(sorted(s for s in listed if "/" not in s)) or "(none)"))
+        if available - allowed:
+            ui.info("GPT excluded by openai.include: " + ", ".join(sorted(available - allowed)))
+        if allowed - listed:
+            ui.warn("GPT available but missing from catalog: " + ", ".join(sorted(allowed - listed))
+                    + " (run `ocx start`)")
     from .discovery import http_json, provider_headers
     routes = load_routes()
     for p in cfg.providers:
@@ -217,17 +284,20 @@ def cmd_serve(cfg: Config, args: argparse.Namespace) -> int:
 
 def cmd_init(cfg: Config, args: argparse.Namespace) -> int:
     dst = Path(args.config).expanduser() if args.config else DEFAULT_CONFIG
+    if not args.config and not args.force and not dst.exists() and LEGACY_CONFIG.exists():
+        ui.warn(f"existing config at {LEGACY_CONFIG}; run `ocx start` to use it")
+        return 1
     if dst.exists() and not args.force:
         ui.warn(f"{dst} already exists (use --force to overwrite)")
         return 1
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(EXAMPLE.read_text())
-    ui.ok(f"wrote {dst}; edit it, then run `opencodex-desktop start`")
+    ui.ok(f"wrote {dst}; edit it, then run `ocx start`")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="opencodex-desktop", description=__doc__,
+    ap = argparse.ArgumentParser(prog="ocx", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", "-c", help=f"YAML config (default {DEFAULT_CONFIG})")
     ap.add_argument("--version", action="version", version=__version__)
@@ -235,12 +305,17 @@ def main(argv: list[str] | None = None) -> int:
     for name, h in [("start", "discover + configure Codex + (re)start router"),
                     ("off", "stop router and restore Codex defaults"),
                     ("stop", "stop the router only"), ("status", "show state"),
-                    ("serve", "run the router in the foreground")]:
+                    ("serve", "run the router in the foreground"),
+                    ("update", "install the current published version")]:
         sub.add_parser(name, help=h)
     p = sub.add_parser("init", help="write an example config")
     p.add_argument("--force", action="store_true")
     args = ap.parse_args(argv)
     cmd = args.cmd or "start"
+    if cmd == "update":
+        return cmd_update()
+    if cmd != "serve":  # The background router is launched by the CLI.
+        _check_update()
     if cmd == "init":
         return cmd_init(None, args)  # type: ignore[arg-type]
     try:

@@ -13,10 +13,19 @@ from typing import Any
 
 import yaml
 
-DEFAULT_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser() / "opencodex-desktop" / "config.yaml"
-STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser() / "opencodex-desktop"
+DEFAULT_PROVIDER_ID = "ocx"
+LEGACY_PROVIDER_ID = "opencodex-desktop"
+SERVICE_IDS = (DEFAULT_PROVIDER_ID, LEGACY_PROVIDER_ID)
+TOKEN_HEADERS = ("x-ocx-token", "x-opencodex-token")
+_CONFIG_ROOT = Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser()
+DEFAULT_CONFIG = _CONFIG_ROOT / DEFAULT_PROVIDER_ID / "config.yaml"
+LEGACY_CONFIG = _CONFIG_ROOT / LEGACY_PROVIDER_ID / "config.yaml"
+_STATE_ROOT = Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser()
+DEFAULT_STATE_DIR = _STATE_ROOT / DEFAULT_PROVIDER_ID
+LEGACY_STATE_DIR = _STATE_ROOT / LEGACY_PROVIDER_ID
+# Existing clients store absolute catalog and token paths. Keep those paths valid.
+STATE_DIR = LEGACY_STATE_DIR if LEGACY_STATE_DIR.is_dir() and not DEFAULT_STATE_DIR.exists() else DEFAULT_STATE_DIR
 DEFAULT_LISTEN = "127.0.0.1:11111"
-DEFAULT_PROVIDER_ID = "opencodex-desktop"
 DEFAULT_CONTEXT = 128_000
 DEFAULT_EFFORTS = ["low", "medium", "high"]
 ANTHROPIC_BASE = "https://api.anthropic.com/v1"
@@ -192,14 +201,15 @@ def _anthropic_provider(raw: dict[str, Any], taken: set[str]) -> ProviderCfg | N
 
 
 def load(path: str | os.PathLike[str] | None = None) -> Config:
-    explicit = path is not None or "OPENCODEX_DESKTOP_CONFIG" in os.environ
-    p = _expand(str(path or os.environ.get("OPENCODEX_DESKTOP_CONFIG") or DEFAULT_CONFIG))
+    override = path or os.environ.get("OCX_CONFIG") or os.environ.get("OPENCODEX_DESKTOP_CONFIG")
+    default = LEGACY_CONFIG if not DEFAULT_CONFIG.exists() and LEGACY_CONFIG.exists() else DEFAULT_CONFIG
+    p = _expand(str(override)) if override else default
     raw: dict[str, Any] = {}
     if p.exists():
         raw = yaml.safe_load(p.read_text()) or {}
         if not isinstance(raw, dict):
             raise ConfigError(f"{p}: top level must be a mapping")
-    elif explicit:
+    elif override:
         raise ConfigError(f"config file {p} does not exist")
 
     listen = str(raw.get("listen", DEFAULT_LISTEN))
@@ -243,8 +253,8 @@ def router_token() -> str:
             return tok
     except OSError:
         pass
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    tok = "ocd-" + secrets.token_urlsafe(32)
+    TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tok = "ocx-" + secrets.token_urlsafe(32)
     fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(tok + "\n")

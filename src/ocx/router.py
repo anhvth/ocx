@@ -7,8 +7,8 @@ Claude Code / Claude Desktop (Anthropic Messages, /v1/messages):
   claude-* -> api.anthropic.com with the client's own login (or this machine's, for Desktop);
   <provider>/<model> -> that provider's native Messages endpoint; gpt-* -> ChatGPT, translated.
 
-Every request must carry the router token (~/.local/state/opencodex-desktop/token) as
-x-opencodex-token, a Bearer token or x-api-key; Codex may instead present its own login.
+Every request must carry the router token (~/.local/state/ocx/token) as
+x-ocx-token, a Bearer token or x-api-key; Codex may instead present its own login.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from aiohttp import web
 from . import __version__, ui
 from .anthropic_adapter import from_messages, to_messages
 from .chat_adapter import from_chat, sse_events, to_chat
-from .config import ANTHROPIC_BASE, Config, router_token
+from .config import ANTHROPIC_BASE, DEFAULT_PROVIDER_ID, TOKEN_HEADERS, Config, router_token
 from .messages_adapter import Translator, fold_system_messages, to_responses
 from .landing import render_landing
 from .usage import fetch_codex_usage
@@ -53,7 +53,7 @@ def _log(msg: str) -> None:
     print(ui.paint(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}"), flush=True)
 
 
-def _error(status: int, message: str, etype: str = "opencodex_desktop_error") -> web.Response:
+def _error(status: int, message: str, etype: str = "ocx_error") -> web.Response:
     return web.json_response({"error": {"message": message, "type": etype}}, status=status)
 
 
@@ -145,7 +145,7 @@ class Router:
         if "cf-connecting-ip" in _req.headers:
             return web.Response(status=403)
         auth = read_openai_auth(self.cfg.codex_home)
-        return web.json_response({"status": "ok", "service": "opencodex-desktop", "version": __version__,
+        return web.json_response({"status": "ok", "service": DEFAULT_PROVIDER_ID, "version": __version__,
                                   "pid": os.getpid(), "openai": auth.mode, "routes": sorted(self.routes)})
 
     def _groups(self) -> list[dict[str, Any]]:
@@ -196,16 +196,19 @@ class Router:
         self.message_count += 1
         self.message_usage.appendleft({"sequence": self.message_count, **capture.result(status)})
 
-    def authorized(self, req: web.Request, claude: bool) -> bool:
+    def _uses_router_token(self, req: web.Request) -> bool:
         h = req.headers
-        if (_same(h.get("x-opencodex-token"), self.token) or _same(h.get("x-api-key"), self.token)
-                or _same(h.get("authorization"), f"Bearer {self.token}")):
+        return (any(_same(h.get(k), self.token) for k in (*TOKEN_HEADERS, "x-api-key"))
+                or _same(h.get("authorization"), f"Bearer {self.token}"))
+
+    def authorized(self, req: web.Request, claude: bool) -> bool:
+        if self._uses_router_token(req):
             return True
         if claude:
             return False
         auth = read_openai_auth(self.cfg.codex_home)  # Codex sends its own login; only this user can read it
         cred = auth.access_token or auth.api_key
-        return _same(h.get("authorization"), f"Bearer {cred}" if cred else None)
+        return _same(req.headers.get("authorization"), f"Bearer {cred}" if cred else None)
 
     async def handle(self, req: web.Request) -> web.StreamResponse:
         tail = req.match_info["tail"]
@@ -213,15 +216,13 @@ class Router:
         claude = tail.startswith("v1/messages") or "anthropic-version" in req.headers
         if req.method == "HEAD":  # connectivity probes (Claude Code's HEAD /api/hello) carry no token
             return web.Response(status=200)
-        if "cf-connecting-ip" in req.headers and not (claude and _same(req.headers.get("authorization"), f"Bearer {self.token}")
-                                                     or claude and _same(req.headers.get("x-api-key"), self.token)
-                                                     or claude and _same(req.headers.get("x-opencodex-token"), self.token)):
+        if "cf-connecting-ip" in req.headers and not (claude and self._uses_router_token(req)):
             # through the public tunnel (Claude app SSH sessions): only the Claude endpoints, only with the token
             _log(f"{req.method} /{tail} -> 403 (tunnel)")
             return web.Response(status=403)
         if not self.authorized(req, claude):
-            msg = ("opencodex-desktop: missing or wrong router token. Claude clients: re-run "
-                   "`opencodex-desktop start` (it writes the token into Claude's settings) and restart them.")
+            msg = ("ocx: missing or wrong router token. Claude clients: re-run "
+                   "`ocx start` (it writes the token into Claude's settings) and restart them.")
             _log(f"{req.method} /{tail} -> 401 (no router token)")
             return _aerror(401, msg, "authentication_error") if claude else _error(401, msg)
         if claude and req.method == "POST" and tail.startswith("v1/messages"):
@@ -239,9 +240,9 @@ class Router:
                     _log(f"{body['model']} => {alias} (matched by model name)")
                     body["model"] = alias
                 else:
-                    return _error(404, f"opencodex-desktop: unknown or currently unreachable model {body['model']}. "
+                    return _error(404, f"ocx: unknown or currently unreachable model {body['model']}. "
                                        f"Available: {', '.join(sorted(self.routes)) or '(none)'}. "
-                                       "`opencodex-desktop status` shows what is up.", "model_not_found")
+                                       "`ocx status` shows what is up.", "model_not_found")
             if isinstance(body, dict) and body.get("model") in self.routes:
                 return await self.routed(req, tail, body)
         return await self.forward_openai(req, tail, raw)
@@ -287,7 +288,7 @@ class Router:
             if model not in self.routes:
                 alias = self.resolve_alias(model)
                 if not alias:
-                    return _aerror(404, f"opencodex-desktop: unknown or currently unreachable model {model}. "
+                    return _aerror(404, f"ocx: unknown or currently unreachable model {model}. "
                                         f"Available: {', '.join(sorted(self.routes)) or '(none)'}", "not_found_error")
                 model = alias
             route = self.routes[model]
@@ -307,7 +308,7 @@ class Router:
         return await self.claude_gpt(req, body, model)
 
     async def claude_native(self, req: web.Request, tail: str, body: dict[str, Any]) -> web.StreamResponse:
-        headers = {k: v for k, v in req.headers.items() if k.lower() not in HOP and k.lower() != "x-opencodex-token"}
+        headers = {k: v for k, v in req.headers.items() if k.lower() not in HOP and k.lower() not in TOKEN_HEADERS}
         lower = {k.lower(): k for k in headers}
         auth_hdr = headers.get(lower.get("authorization", ""), "")
         api_hdr = headers.get(lower.get("x-api-key", ""), "")
@@ -317,7 +318,7 @@ class Router:
             # subscription login is only for Claude Code itself, so this needs an Anthropic API key.
             anth = self.providers.get("anthropic")
             if not (anth and anth.api_key):
-                return _aerror(401, "opencodex-desktop: claude-* through the gateway needs an Anthropic API key "
+                return _aerror(401, "ocx: claude-* through the gateway needs an Anthropic API key "
                                     "(set ANTHROPIC_API_KEY or `anthropic: {api_key_file: ...}`, then start again)",
                                "authentication_error")
             for k in ("authorization", "x-api-key"):
@@ -332,7 +333,7 @@ class Router:
     async def claude_routed(self, req: web.Request, body: dict[str, Any], route: Any) -> web.StreamResponse:
         provider = self.providers.get(route.provider)
         if provider is None or not provider.anthropic_url:
-            return _aerror(400, f"opencodex-desktop: provider {route.provider} has no Anthropic Messages endpoint; "
+            return _aerror(400, f"ocx: provider {route.provider} has no Anthropic Messages endpoint; "
                                 "set `anthropic_url:` for it in the config", "invalid_request_error")
         headers = {"content-type": "application/json",
                    "anthropic-version": req.headers.get("anthropic-version", "2023-06-01")}
@@ -343,8 +344,9 @@ class Router:
         body = {**body, "model": route.upstream_model, "messages": fold_system_messages(body.get("messages") or [])}
         for k in ("context_management", "container", "mcp_servers"):
             body.pop(k, None)
-        if os.environ.get("OPENCODEX_DESKTOP_DUMP_DIR"):  # debugging only: bodies contain prompts
-            with open(os.path.join(os.environ["OPENCODEX_DESKTOP_DUMP_DIR"], f"{time.time():.3f}.json"), "w") as f:
+        if dump_dir := os.environ.get("OCX_DUMP_DIR") or os.environ.get("OPENCODEX_DESKTOP_DUMP_DIR"):
+            # Debugging only: bodies contain prompts.
+            with open(os.path.join(dump_dir, f"{time.time():.3f}.json"), "w") as f:
                 json.dump(body, f)
         return await self.stream(req, "POST", f"{provider.anthropic_url}/messages", headers,
                                  json.dumps(body).encode(), label=f"{route.slug} (claude)", model=route.slug)
@@ -352,7 +354,7 @@ class Router:
     async def claude_gpt(self, req: web.Request, body: dict[str, Any], model: str) -> web.StreamResponse:
         auth = read_openai_auth(self.cfg.codex_home)
         if auth.mode == "none" or not auth.upstream:
-            return _aerror(401, "opencodex-desktop: not logged in to Codex; run `codex login`", "authentication_error")
+            return _aerror(401, "ocx: not logged in to Codex; run `codex login`", "authentication_error")
         headers = {"content-type": "application/json", "accept": "text/event-stream",
                    "Authorization": f"Bearer {auth.access_token or auth.api_key}"}
         if auth.mode == "chatgpt" and auth.account_id:
@@ -398,7 +400,7 @@ class Router:
                 _log(f"{model} (claude) -> 200 ({time.monotonic() - start:.1f}s, client closed early)")
                 return resp
             _log(f"{model} (claude) -> unreachable: {e!r}")
-            return _aerror(502, f"opencodex-desktop: cannot reach ChatGPT: {e}")
+            return _aerror(502, f"ocx: cannot reach ChatGPT: {e}")
         finally:
             self.record_usage(capture, status)
         _log(f"{model} (claude) -> {'200' if not tr.error else '502 ' + tr.error} ({time.monotonic() - start:.1f}s)")
@@ -414,7 +416,7 @@ class Router:
     async def forward_openai(self, req: web.Request, tail: str, raw: bytes) -> web.StreamResponse:
         auth = read_openai_auth(self.cfg.codex_home)
         if auth.mode == "none" or not auth.upstream:
-            return _error(401, "opencodex-desktop: not logged in to Codex; run `codex login` (or sign in in the Codex app)")
+            return _error(401, "ocx: not logged in to Codex; run `codex login` (or sign in in the Codex app)")
         sub = tail[3:] if tail.startswith("v1/") else tail
         if req.method == "POST" and sub in ("responses", "responses/compact") and raw:
             try:
@@ -430,13 +432,12 @@ class Router:
                     body["input"] = items
                     raw = json.dumps(body).encode()
         url = f"{auth.upstream}/{sub}" + (f"?{req.query_string}" if req.query_string else "")
-        headers = {k: v for k, v in req.headers.items() if k.lower() not in HOP}
+        headers = {k: v for k, v in req.headers.items() if k.lower() not in HOP and k.lower() not in TOKEN_HEADERS}
         # Gateway clients present the local token, not an OpenAI credential.
-        gateway = (_same(req.headers.get("authorization"), f"Bearer {self.token}")
-                   or _same(req.headers.get("x-opencodex-token"), self.token))
+        gateway = self._uses_router_token(req)
         if gateway:
             headers = {k: v for k, v in headers.items()
-                       if k.lower() not in ("authorization", "x-opencodex-token", "x-api-key", "chatgpt-account-id")}
+                       if k.lower() not in ("authorization", "x-api-key", "chatgpt-account-id")}
             if sub == "responses" and auth.mode == "chatgpt" and raw:
                 try:
                     body = json.loads(raw)
@@ -501,7 +502,7 @@ class Router:
                 _log(f"{label} -> {resp.status} ({time.monotonic() - start:.1f}s, client closed early)")
                 return resp
             _log(f"{label} -> unreachable: {e!r}")
-            return _error(502, f"opencodex-desktop: cannot reach {url.split('?')[0]}: {e}", "upstream_unreachable")
+            return _error(502, f"ocx: cannot reach {url.split('?')[0]}: {e}", "upstream_unreachable")
         finally:
             if capture:
                 self.record_usage(capture, status)
@@ -511,7 +512,7 @@ class Router:
         route = self.routes[body["model"]]
         provider = self.providers.get(route.provider)
         if provider is None:
-            return _error(500, f"opencodex-desktop: provider {route.provider} missing from config; re-run start")
+            return _error(500, f"ocx: provider {route.provider} missing from config; re-run start")
         headers = {**provider_headers(provider), "content-type": "application/json"}
 
         if tail.endswith("/compact") or is_compaction_request(body):
@@ -588,7 +589,7 @@ class Router:
         return response_text(await self.post_json(f"{route.base_url}/responses", headers, cb, route.slug))
 
 
-HEALTH_INTERVAL = int(os.environ.get("OPENCODEX_DESKTOP_HEALTH_INTERVAL", "60"))
+HEALTH_INTERVAL = int(os.environ.get("OCX_HEALTH_INTERVAL") or os.environ.get("OPENCODEX_DESKTOP_HEALTH_INTERVAL", "60"))
 
 
 def _quiet_discover(cfg: Config):
@@ -620,6 +621,6 @@ def build_app(cfg: Config) -> web.Application:
 
 def serve(cfg: Config) -> None:
     app = build_app(cfg)
-    _log(f"opencodex-desktop {__version__} listening on {cfg.listen_host}:{cfg.listen_port}; "
+    _log(f"ocx {__version__} listening on {cfg.listen_host}:{cfg.listen_port}; "
          f"{len(load_routes())} routed models; codex home {cfg.codex_home}")
     web.run_app(app, host=cfg.listen_host, port=cfg.listen_port, print=None, access_log=None)

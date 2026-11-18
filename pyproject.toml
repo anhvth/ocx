@@ -1,6 +1,6 @@
 [project]
-name = "opencodex-desktop"
-version = "0.4.2"
+name = "ocx"
+version = "0.4.4"
 description = "Use Qwen, Claude, local vLLM, or any OpenAI-compatible model in the Codex Desktop app and CLI next to your ChatGPT models, from one YAML file"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,7 +14,8 @@ dependencies = [
 ]
 
 [project.scripts]
-opencodex-desktop = "opencodex_desktop.cli:main"
+ocx = "ocx.cli:main"
+opencodex-desktop = "ocx.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/anhvth/opencodex-desktop"
@@ -25,7 +26,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/opencodex_desktop"]
+packages = ["src/ocx"]
 
 [dependency-groups]
 dev = [

@@ -6,8 +6,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from opencodex_desktop import config, pi_setup, router
-from opencodex_desktop.discovery import Discovery, OpenAIAuth, Route
+from ocx import config, pi_setup, router
+from ocx.discovery import Discovery, OpenAIAuth, Route
 
 
 def test_pi_settings_symlink_survives_sync_and_restore(tmp_path, monkeypatch):
@@ -26,7 +26,7 @@ def test_pi_settings_symlink_survives_sync_and_restore(tmp_path, monkeypatch):
     discovery = Discovery(OpenAIAuth("chatgpt"), [{"slug": "gpt-test", "context_window": 200000}], [])
     pi_setup.apply_pi_config(cfg, discovery)
     assert link.is_symlink()
-    assert json.loads(target.read_text())["enabledModels"] == ["opencodex-desktop/gpt-test"]
+    assert json.loads(target.read_text())["enabledModels"] == ["ocx/gpt-test"]
     pi_setup.restore_pi_config(cfg)
     assert link.is_symlink()
     assert json.loads(target.read_text()) == {"defaultModel": "gpt-test"}
@@ -57,7 +57,7 @@ def test_pi_sync_restore(tmp_path, monkeypatch):
     assert [m["id"] for m in provider["models"]] == ["gpt-test", "vendor/model"]
     assert provider["models"][1]["maxTokens"] == 32000
     assert provider["models"][1]["thinkingLevelMap"]["high"] == "high"
-    assert json.loads((home / "settings.json").read_text())["enabledModels"] == ["opencodex-desktop/gpt-test", "opencodex-desktop/vendor/model"]
+    assert json.loads((home / "settings.json").read_text())["enabledModels"] == ["ocx/gpt-test", "ocx/vendor/model"]
     # Re-discovery replaces the managed list; unrelated edits survive off.
     pi_setup.apply_pi_config(cfg, Discovery(d.openai, d.openai_models, []))
     result = json.loads((home / "models.json").read_text())

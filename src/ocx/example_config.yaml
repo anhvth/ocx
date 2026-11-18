@@ -1,6 +1,6 @@
-# opencodex-desktop config: the ONE file for everything.
-# Location: ~/.config/opencodex-desktop/config.yaml  (or pass --config / $OPENCODEX_DESKTOP_CONFIG)
-# With no file at all, `opencodex-desktop start` serves just your ChatGPT models.
+# ocx config: the ONE file for everything.
+# Location: ~/.config/ocx/config.yaml  (or pass --config / $OCX_CONFIG)
+# With no file at all, `ocx start` serves just your ChatGPT models.
 
 # Where Codex keeps config.toml + auth.json. $CODEX_HOME wins; otherwise the first
 # existing entry below; otherwise ~/.codex.
@@ -24,7 +24,7 @@ openai:
 # max_context_window: 300000
 
 # Model selected in Codex after start (optional). Format: <provider>/<model> or a GPT slug.
-# default_model: alibaba/qwen4-max-preview
+# default_model: alibaba/qwen4-max
 
 # Claude models (anthropic/claude-*). Enabled automatically when $ANTHROPIC_API_KEY is set;
 # uncomment to configure explicitly. Needs an Anthropic API key (not a Claude subscription).
@@ -45,9 +45,7 @@ providers:
     # Anthropic Messages endpoint: makes these models usable from Claude Code and the Claude app too.
     anthropic_url: https://token-plan.maas.qwencloudapi.com/apps/anthropic/v1
     models:
-      - qwen4-max-preview:
-          context_window: 1000000
-          max_output_tokens: 393216
+      - qwen4-max: {context_window: 300000, input_modalities: [text, image]}
       - qwen3.8-max:
           context_window: 1000000
           max_output_tokens: 131072

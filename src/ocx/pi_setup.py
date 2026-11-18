@@ -8,11 +8,11 @@ import shlex
 from pathlib import Path
 
 from . import ui
-from .config import TOKEN_FILE, Config, ConfigError, router_token
+from .config import DEFAULT_PROVIDER_ID, LEGACY_PROVIDER_ID, TOKEN_FILE, Config, ConfigError, router_token
 from .discovery import Discovery
 from .local_settings import managed_local_link
 
-PROVIDER = "opencodex-desktop"
+PROVIDER = DEFAULT_PROVIDER_ID
 SETTINGS_KEYS = ("enabledModels", "defaultProvider", "defaultModel")
 
 
@@ -75,17 +75,19 @@ def apply_pi_config(cfg: Config, d: Discovery) -> None:
     models_path, settings_path = home / "models.json", home / "settings.json"
     models, settings = _read(models_path), _read(settings_path)
     providers = models.setdefault("providers", {})
-    backup = home / "opencodex-desktop-backup.json"
+    backup = home / f"{PROVIDER}-backup.json"
+    legacy_backup = home / f"{LEGACY_PROVIDER_ID}-backup.json"
     if not backup.exists():
         _write(backup, {"provider": providers.get(PROVIDER),
                         "settings": {k: settings[k] for k in SETTINGS_KEYS if k in settings}})
     router_token()
     rows = build_models(d)
-    providers[PROVIDER] = {"name": "opencodex-desktop", "baseUrl": cfg.base_url,
-                           "api": "openai-responses", "apiKey": f"!cat {shlex.quote(str(TOKEN_FILE))}",
-                           "models": rows}
+    providers[PROVIDER] = {"name": PROVIDER, "baseUrl": cfg.base_url,
+                           "api": "openai-responses", "apiKey": f"!cat {shlex.quote(str(TOKEN_FILE))}", "models": rows}
+    if legacy_backup.exists() and LEGACY_PROVIDER_ID in providers:
+        providers[LEGACY_PROVIDER_ID] = providers[PROVIDER].copy()  # Old Pi sessions store the provider ID.
     slugs = [m["id"] for m in rows]
-    # exact ids: Pi's "*" does not match "/", so "opencodex-desktop/*" would hide alibaba/... models
+    # exact ids: Pi's "*" does not match "/", so "ocx/*" would hide alibaba/... models
     settings["enabledModels"] = [f"{PROVIDER}/{s}" for s in slugs]
     current = settings.get("defaultModel")
     if current not in slugs:
@@ -100,21 +102,26 @@ def apply_pi_config(cfg: Config, d: Discovery) -> None:
 
 def restore_pi_config(cfg: Config) -> None:
     home = agent_home()
-    backup = home / "opencodex-desktop-backup.json"
-    if not backup.exists():
+    backups = {provider: home / f"{provider}-backup.json" for provider in (PROVIDER, LEGACY_PROVIDER_ID)
+               if (home / f"{provider}-backup.json").exists()}
+    if not backups:
         return
-    saved = _read(backup)
     models_path, settings_path = home / "models.json", home / "settings.json"
     models, settings = _read(models_path), _read(settings_path)
     providers = models.get("providers", {})
-    if saved["provider"] is None:
-        providers.pop(PROVIDER, None)
-    else:
-        providers[PROVIDER] = saved["provider"]
+    saved_settings = {}
+    for provider, backup in backups.items():
+        saved = _read(backup)
+        if saved["provider"] is None:
+            providers.pop(provider, None)
+        else:
+            providers[provider] = saved["provider"]
+        saved_settings = saved["settings"]  # A legacy backup predates the rename.
     for key in SETTINGS_KEYS:
         settings.pop(key, None)
-    settings.update(saved["settings"])
+    settings.update(saved_settings)
     _write(models_path, models)
     _write(settings_path, settings)
-    backup.unlink()
+    for backup in backups.values():
+        backup.unlink()
     ui.ok(f"restored Pi's previous model scope and defaults in {home}")

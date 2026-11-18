@@ -6,9 +6,9 @@ from types import SimpleNamespace
 import aiohttp
 from aiohttp import web
 
-from opencodex_desktop import codex_setup, router, usage
-from opencodex_desktop.discovery import Route
-from opencodex_desktop.landing import USAGE_URL, render_landing
+from ocx import codex_setup, router, usage
+from ocx.discovery import Route
+from ocx.landing import USAGE_URL, render_landing
 
 
 def test_render_landing_escapes_model_slugs():

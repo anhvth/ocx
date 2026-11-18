@@ -1,4 +1,4 @@
-# opencodex-desktop
+# ocx
 
 Use **Qwen (Alibaba), Claude (Anthropic), local vLLM, or any OpenAI-compatible model** in the **Codex
 Desktop app** and the `codex` CLI, side by side with your normal ChatGPT models (fast mode included),
@@ -7,7 +7,7 @@ One YAML file, one command.
 
 ```
 Codex app / codex CLI ──┐
-Claude Code / Claude app ┴► opencodex-desktop router (127.0.0.1:11111)
+Claude Code / Claude app ┴► ocx router (127.0.0.1:11111)
                               ├─ gpt-*            ──► ChatGPT (your existing Codex login, untouched)
                               ├─ alibaba/qwen…    ──► Alibaba Token Plan
                               ├─ anthropic/claude…──► Anthropic Messages API
@@ -43,35 +43,56 @@ uv tool install git+https://github.com/anhvth/opencodex-desktop   # once
 
 # 1. ChatGPT models only: works with no config if you are signed in to Codex
 #    (claude-* models join automatically when $ANTHROPIC_API_KEY is set)
-opencodex-desktop start
+ocx start
 
 # 2. Add other models: write the config, edit it, start again
-opencodex-desktop init
-$EDITOR ~/.config/opencodex-desktop/config.yaml
-opencodex-desktop start
+ocx init
+$EDITOR ~/.config/ocx/config.yaml
+ocx start
 
 # 3. Back to plain Codex at any time
-opencodex-desktop off
+ocx off
 ```
 
 Then restart the Codex app (or open a new `codex` session) and pick a model.
 
 No install? Run any command as
-`uvx --from git+https://github.com/anhvth/opencodex-desktop opencodex-desktop <command>`.
+`uvx --from git+https://github.com/anhvth/opencodex-desktop ocx <command>`.
+
+### Upgrading from opencodex-desktop
+
+If you installed the old tool with uv, stop its router and uninstall the old package before
+installing OCX. Both packages provide the legacy `opencodex-desktop` command, so removing the
+old package first avoids an executable conflict.
+
+```bash
+opencodex-desktop stop
+uv tool uninstall opencodex-desktop
+uv tool install --refresh git+https://github.com/anhvth/opencodex-desktop.git
+ocx start
+```
+
+OCX reads the old config when no new config exists and reuses existing router state. It
+preserves legacy provider IDs for saved threads and accepts the old token header.
 
 ## Commands
+
+Commands check GitHub for a newer package version and print a notice when one is available.
+The check has a two-second timeout. Run `ocx update` to install the latest published code
+with uv, then `ocx start` to load it into the router.
 
 | command | what it does |
 |---|---|
 | `start` (default) | reads the YAML, checks every provider, configures Codex, Claude and Pi, and (re)starts the router in the background |
 | `off` | stops the router, removes its Codex/Claude settings, and restores Pi's previous model scope and defaults |
-| `status` | shows the login, the router, what Codex points at, and the routed models with their context windows |
+| `status` | checks the GPT model list and shows catalog gaps, allowlist exclusions, and routed models |
+| `update` | updates the installed package from GitHub without restarting the running router |
 | `stop` | stops only the router (Codex stays pointed at it) |
 | `init` | writes an example config (`--force` overwrites an existing one) |
 | `serve` | runs the router in the foreground (for debugging / systemd) |
 
 Run `start` again after any change (new model, new key, new machine). It is idempotent.
-Use `--config PATH` or `$OPENCODEX_DESKTOP_CONFIG` to point at a different YAML.
+Use `--config PATH` or `$OCX_CONFIG` to point at a different YAML.
 
 ## Web dashboard
 
@@ -89,13 +110,13 @@ Only metadata is kept in RAM; prompts, response text and credentials are not sto
 History starts when the router starts, is cleared on restart, and is not backfilled from old chats.
 The dashboard and its read-only JSON are blocked through the public Claude tunnel.
 
-## Config (`~/.config/opencodex-desktop/config.yaml`)
+## Config (`~/.config/ocx/config.yaml`)
 
 ```yaml
 codex_home: [~/.codex]          # $CODEX_HOME wins; first existing entry otherwise
 listen: 127.0.0.1:11111
 openai: {enabled: true}         # GPT models from your Codex login
-# default_model: alibaba/qwen4-max-preview
+# default_model: alibaba/qwen4-max
 
 anthropic: {}                   # claude-* from $ANTHROPIC_API_KEY; or set api_key/api_key_file below
 
@@ -104,7 +125,7 @@ providers:
     base_url: https://token-plan.maas.qwencloudapi.com/compatible-mode/v1
     api_key_file: ~/.config/claude-alibaba/token   # or api_key_env: VAR, or api_key: sk-...
     models:
-      - qwen4-max-preview: {context_window: 1000000, max_output_tokens: 393216}
+      - qwen4-max: {context_window: 300000, input_modalities: [text, image]}
       - qwen3.8-max:       {context_window: 1000000, max_output_tokens: 131072}
   local-vllm:
     base_url: http://127.0.0.1:7788/v1
@@ -161,11 +182,14 @@ extended-thinking budget (`low` 4k, `medium` 16k, `high` 32k tokens, capped to f
 
 | path | contents |
 |---|---|
-| `~/.config/opencodex-desktop/config.yaml` | your config (the only file you edit) |
-| `~/.local/state/opencodex-desktop/` | `router.log`, `router.pid`, `routes.json`, `model-catalog.json`, `token`, `tunnel.{pid,url,log}` |
-| `~/.claude/settings.json` | `env` (router URL + token header), `modelPicker.options`, `modelSettings`; backed up as `settings.json.bak-opencodex-desktop-*` |
-| `~/Library/Application Support/Claude-3p/configLibrary/` | the Claude app's `opencodex-desktop` gateway profile (macOS) |
-| `$CODEX_HOME/config.toml` | gets `model_provider`, `model_catalog_json`, `[model_providers.opencodex-desktop]`; backed up as `config.toml.bak-opencodex-desktop-*` before every change |
+| `~/.config/ocx/config.yaml` | your config (the only file you edit) |
+| `~/.local/state/ocx/` | `router.log`, `router.pid`, `routes.json`, `model-catalog.json`, `token`, `tunnel.{pid,url,log}` |
+| `~/.claude/settings.json` | `env` (router URL + token header), `modelPicker.options`, `modelSettings`; backed up as `settings.json.bak-ocx-*` |
+| `~/Library/Application Support/Claude-3p/configLibrary/` | the Claude app's `ocx` gateway profile (macOS) |
+| `$CODEX_HOME/config.toml` | gets `model_provider`, `model_catalog_json`, `[model_providers.ocx]`; backed up as `config.toml.bak-ocx-*` before every change |
+
+Existing installs may still use `~/.config/opencodex-desktop/config.yaml` and
+`~/.local/state/opencodex-desktop/`. `ocx status` shows the config in use.
 
 API keys are read when needed and never written into Codex's config or the state dir.
 
@@ -174,13 +198,13 @@ API keys are read when needed and never written into Codex's config or the state
 If Pi's agent directory exists, `start` also configures Pi using the **same discovery results as Codex**.
 The YAML above controls the list; do not maintain a separate list in Pi.
 
-- Adds one `opencodex-desktop` provider to `~/.pi/agent/models.json`, using the router's Responses API.
+- Adds one `ocx` provider to `~/.pi/agent/models.json`, using the router's Responses API.
   Model names are the canonical slugs, with context, output limits and reasoning levels from discovery.
-- Sets `enabledModels` to `opencodex-desktop/*`, so `/model` defaults to a clean, project-managed list.
+- Sets `enabledModels` to `ocx/*`, so `/model` defaults to a clean, project-managed list.
   Pi's Tab key can still switch the picker to all providers; existing providers and logins are preserved.
 - Selects an available startup model (retains the current slug if available, otherwise the YAML default
   or first discovered model). Resumed sessions retain their model: use `/model` to switch old sessions.
-- Honors `PI_CODING_AGENT_DIR`. Saves previous managed settings in `opencodex-desktop-backup.json`
+- Honors `PI_CODING_AGENT_DIR`. Saves previous managed settings in `ocx-backup.json`
   inside that directory; `off` restores them without reverting unrelated settings.
 - Provider health checks synchronize Pi's list too. Restart Pi after a model-list change to refresh
   its scope (Pi resolves scoped patterns at startup). GPT models use the existing Codex login through
@@ -193,9 +217,9 @@ cost display for these models is not a billing estimate.
 ## Claude Code and the Claude desktop app
 
 `start` also writes `~/.claude/settings.json` (backed up first; `off` removes exactly what it added):
-`ANTHROPIC_BASE_URL` = the router, an `x-opencodex-token` header (the router's local token,
-`~/.local/state/opencodex-desktop/token`), `/model` rows for every GPT and routed model, and an
-`autoCompactWindow` per model. On macOS it adds a gateway profile `opencodex-desktop` to the Claude
+`ANTHROPIC_BASE_URL` = the router, an `x-ocx-token` header (the router's local token,
+`~/.local/state/ocx/token`), `/model` rows for every GPT and routed model, and an
+`autoCompactWindow` per model. On macOS it adds a gateway profile `ocx` to the Claude
 app (third-party mode) with the Claude, GPT and routed models; restart the app to load it.
 
 - `claude-*` from Claude Code go to api.anthropic.com unchanged, with Claude Code's own login (that
@@ -223,7 +247,7 @@ Anthropic does not support non-Claude models behind Claude Code; treat that part
 
 ## Remote machines (Codex Desktop over SSH)
 
-A remote Desktop chat runs its own `codex app-server` on the remote host, so run `opencodex-desktop start`
+A remote Desktop chat runs its own `codex app-server` on the remote host, so run `ocx start`
 **on that host** too (with its own config, e.g. `models: auto` against a local vLLM).
 
 ## Troubleshooting
@@ -231,13 +255,13 @@ A remote Desktop chat runs its own `codex app-server` on the remote host, so run
 - **Model missing from the picker** — read the `start` output: unreachable providers, bad keys and
   unserved models are dropped with a ✗ line. If a provider was down during `start`, run `start` again
   once it is back.
-- **What is happening** — `opencodex-desktop status`; the log is `~/.local/state/opencodex-desktop/router.log`.
+- **What is happening** — `ocx status`; the log is `~/.local/state/ocx/router.log`.
 - **Port already in use** — `start` refuses; set a different `listen:` address.
 - **Tiny context windows** — below ~32k Codex cannot run (its prompt and tools take ~20k).
 - **Old custom-model threads after `off`** — a Desktop chat stays bound to its model's provider, so
   those threads will not continue; start a new chat.
 
-The repo also ships an agent skill ([`skills/opencodex-desktop/`](skills/opencodex-desktop/SKILL.md))
+The repo also ships an agent skill ([`skills/ocx/`](skills/ocx/SKILL.md))
 that teaches coding agents to set up, verify and debug this tool.
 
 ## License

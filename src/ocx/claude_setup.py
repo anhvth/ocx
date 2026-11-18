@@ -2,7 +2,7 @@
 
 Claude Code: ~/.claude/settings.json gets
   env.ANTHROPIC_BASE_URL       the router (Claude Code appends /v1/messages)
-  env.ANTHROPIC_CUSTOM_HEADERS x-opencodex-token: <router token>   (claude-* still use your own login)
+  env.ANTHROPIC_CUSTOM_HEADERS x-ocx-token: <router token>   (claude-* still use your own login)
   modelPicker.options          one row per GPT / <provider>/<model> model, after the built-in Claude rows
   modelSettings.<model>        autoCompactWindow below the model's real context window
 Claude desktop app (macOS, third-party mode): a gateway profile in
@@ -23,17 +23,18 @@ from pathlib import Path
 from typing import Any
 
 from . import tunnel, ui
-from .config import Config, router_token
+from .config import TOKEN_HEADERS, Config, router_token
 from .discovery import Discovery
 from .local_settings import managed_local_link
 
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
 SETTINGS = CLAUDE_HOME / "settings.json"
-TAG = "via opencodex-desktop"
+TAG = "via ocx"
+LEGACY_TAG = "via opencodex-desktop"
 ONE_M = 900_000  # windows at least this big get Claude Code's 1M ("[1m]") window
 DESKTOP = Path("~/Library/Application Support/Claude-3p").expanduser()
 PROFILE_ID = "00000000-0000-4000-8000-00000000c0de"
-PROFILE_NAME = "opencodex-desktop"
+PROFILE_NAME = "ocx"
 CLAUDE_ROWS = [("claude-opus-5-5", "Claude Opus 5.5"), ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
                ("claude-haiku-5-5", "Claude Haiku 5.5"), ("claude-fable-5-1", "Claude Fable 5.1")]
 
@@ -74,7 +75,7 @@ def _write(path: Path, data: dict[str, Any]) -> None:
 def _backup(path: Path) -> Path | None:
     if not path.exists():
         return None
-    dst = path.with_name(f"{path.name}.bak-opencodex-desktop-{time.strftime('%Y%m%d-%H%M%S')}")
+    dst = path.with_name(f"{path.name}.bak-ocx-{time.strftime('%Y%m%d-%H%M%S')}")
     shutil.copy2(path, dst, follow_symlinks=True)
     os.chmod(dst, 0o600)
     return dst
@@ -82,13 +83,14 @@ def _backup(path: Path) -> Path | None:
 
 def _strip_ours(s: dict[str, Any]) -> None:
     env = s.get("env") or {}
-    if "x-opencodex-token" in str(env.get("ANTHROPIC_CUSTOM_HEADERS", "")):
+    if any(f"{header}:" in str(env.get("ANTHROPIC_CUSTOM_HEADERS", "")).lower() for header in TOKEN_HEADERS):
         env.pop("ANTHROPIC_CUSTOM_HEADERS", None)
         env.pop("ANTHROPIC_BASE_URL", None)
     if not env:
         s.pop("env", None)
     picker = s.get("modelPicker") or {}
-    opts = [o for o in picker.get("options") or [] if TAG not in str(o.get("description", ""))]
+    opts = [o for o in picker.get("options") or []
+            if not str(o.get("description", "")).endswith((TAG, LEGACY_TAG))]
     if opts:
         picker["options"] = opts
     else:
@@ -96,7 +98,7 @@ def _strip_ours(s: dict[str, Any]) -> None:
     if not picker:
         s.pop("modelPicker", None)
     ms = s.get("modelSettings") or {}
-    for k in [k for k, v in ms.items() if isinstance(v, dict) and v.get("_opencodexDesktop")]:
+    for k in [k for k, v in ms.items() if isinstance(v, dict) and (v.get("_ocx") or v.get("_opencodexDesktop"))]:
         del ms[k]
     if "modelSettings" in s and not ms:
         del s["modelSettings"]
@@ -112,7 +114,7 @@ def apply_claude_config(cfg: Config, d: Discovery) -> None:
         if env.get(k):
             ui.warn(f"{SETTINGS}: env.{k} is set, so Claude models use that key instead of your Claude login")
     env["ANTHROPIC_BASE_URL"] = cfg.anthropic_base
-    env["ANTHROPIC_CUSTOM_HEADERS"] = f"x-opencodex-token: {router_token()}"
+    env["ANTHROPIC_CUSTOM_HEADERS"] = f"{TOKEN_HEADERS[0]}: {router_token()}"
     picker = s.setdefault("modelPicker", {})
     opts = picker.setdefault("options", [])
     ms = s.setdefault("modelSettings", {})
@@ -128,11 +130,7 @@ def apply_claude_config(cfg: Config, d: Discovery) -> None:
         if r["slug"] in efforts:
             settings["effortLevel"] = efforts[r["slug"]]
         if settings:
-            # Collapse stale case-variant keys of the same slug instead of adding another one.
-            for k in [k for k in ms if k.lower() == r["slug"].lower()
-                      and isinstance(ms[k], dict) and ms[k].get("_opencodexDesktop")]:
-                del ms[k]
-            ms[r["slug"]] = {**settings, "_opencodexDesktop": True}
+            ms[r["slug"]] = {**settings, "_ocx": True}
     if not ms:
         del s["modelSettings"]
     small = [r["slug"] for r in rows if r["ctx"] and r["ctx"] < 200_000]
@@ -262,4 +260,4 @@ def restore_desktop_config() -> None:
             meta.pop("appliedId", None)
     _write(meta_path, meta)
     (lib / f"{PROFILE_ID}.json").unlink(missing_ok=True)
-    ui.ok("removed the opencodex-desktop profile from the Claude desktop app")
+    ui.ok("removed the ocx profile from the Claude desktop app")

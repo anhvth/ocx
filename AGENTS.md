@@ -1,7 +1,7 @@
 # AGENTS.md
 
-Notes for coding agents working on opencodex-desktop. User-facing docs are in README.md; the
-operator runbook is `skills/opencodex-desktop/SKILL.md`.
+Notes for coding agents working on ocx. User-facing docs are in README.md; the
+operator runbook is `skills/ocx/SKILL.md`.
 
 ## Model naming (canonical slugs)
 
@@ -23,8 +23,9 @@ Every non-OpenAI model Codex sees is named `<provider>/<model-id>`:
 
 ## Router endpoints (one address, two API formats)
 
-`http://127.0.0.1:11111`; every call needs the router token (`~/.local/state/opencodex-desktop/token`)
-as `x-opencodex-token`, `x-api-key` or `Authorization: Bearer` (Codex may send its own login instead).
+`http://127.0.0.1:11111`; authenticated calls use the router token (`~/.local/state/ocx/token`
+on new installs) as `x-ocx-token`, `x-api-key` or `Authorization: Bearer`. Codex may send its own
+login instead. Keep accepting `x-opencodex-token` and preserve provider IDs used by existing threads.
 
 - OpenAI Responses (Codex, Pi): `POST /v1/responses`, `/v1/responses/compact`; other paths pass
   through to OpenAI. `/v1/chat/completions` is not translated for GPT.
@@ -66,4 +67,4 @@ as `x-opencodex-token`, `x-api-key` or `Authorization: Bearer` (Codex may send i
 `uv run pytest -q`. For behaviour Codex depends on, test with real Codex traffic against an isolated
 `CODEX_HOME` + `XDG_STATE_HOME` and a non-default `listen:` port, never the user's live router:
 `codex exec --skip-git-repo-check -m <slug> "..." </dev/null`, the TUI in tmux, and
-`skills/opencodex-desktop/scripts/app_server_turn.py`.
+`skills/ocx/scripts/app_server_turn.py`.

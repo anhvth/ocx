@@ -269,13 +269,13 @@ def render_landing(version: str, base_url: str, groups: list[dict], usage: dict 
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>opencodex-desktop · model control plane</title>
+<title>ocx · model control plane</title>
 <style>{_CSS}</style>
 </head>
 <body>
 <header class="site-header"><div class="header-inner">
   <div class="brand"><span class="logo" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="19" cy="19" r="2.4"/><path d="M7.2 10.8 16.8 6.2M7.2 13.2 16.8 17.8"/></svg></span>
-    <span class="brand-name">opencodex-desktop</span><span class="version">v{_esc(version)}</span></div>
+    <span class="brand-name">ocx</span><span class="version">v{_esc(version)}</span></div>
   <div class="head-right">
     <span class="status"><span class="dot" id="status-dot" aria-hidden="true"></span>Running</span>
     <button class="icon-btn" id="refresh" type="button" aria-label="Refresh usage and model stats" title="Refresh">
@@ -316,14 +316,14 @@ def render_landing(version: str, base_url: str, groups: list[dict], usage: dict 
         <p class="note">API requests require the router token. This page is read-only and local-only.</p>
       </section>
       <section class="card panel reveal" aria-label="Quick commands"><h2>Quick commands</h2>
-        <div class="command"><code>pi --list-models opencodex-desktop</code><button class="copy" type="button" aria-label="Copy pi list models command" data-copy="pi --list-models opencodex-desktop">Copy</button></div>
-        <div class="command"><code>opencodex-desktop status</code><button class="copy" type="button" aria-label="Copy status command" data-copy="opencodex-desktop status">Copy</button></div>
-        <div class="command"><code>opencodex-desktop start</code><button class="copy" type="button" aria-label="Copy start command" data-copy="opencodex-desktop start">Copy</button></div>
+        <div class="command"><code>pi --list-models ocx</code><button class="copy" type="button" aria-label="Copy pi list models command" data-copy="pi --list-models ocx">Copy</button></div>
+        <div class="command"><code>ocx status</code><button class="copy" type="button" aria-label="Copy status command" data-copy="ocx status">Copy</button></div>
+        <div class="command"><code>ocx start</code><button class="copy" type="button" aria-label="Copy start command" data-copy="ocx start">Copy</button></div>
       </section>
     </div>
   </div>
 </main>
-<footer><span>opencodex-desktop</span>·<span>read-only dashboard</span>·<span>loopback only</span>·<span>no credentials rendered</span></footer>
+<footer><span>ocx</span>·<span>read-only dashboard</span>·<span>loopback only</span>·<span>no credentials rendered</span></footer>
 <script>{_JS}</script>
 </body>
 </html>"""

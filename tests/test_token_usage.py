@@ -6,10 +6,10 @@ import aiohttp
 from aiohttp import web
 import pytest
 
-from opencodex_desktop import codex_setup, config, router
-from opencodex_desktop.discovery import OpenAIAuth, Route
-from opencodex_desktop.landing import render_landing
-from opencodex_desktop.token_usage import TokenUsage, _LIMIT
+from ocx import codex_setup, config, router
+from ocx.discovery import OpenAIAuth, Route
+from ocx.landing import render_landing
+from ocx.token_usage import TokenUsage, _LIMIT
 
 
 @pytest.mark.parametrize("usage, expected", [
