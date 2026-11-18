@@ -32,7 +32,7 @@ def test_landing_is_public_while_api_stays_protected(tmp_path, monkeypatch):
                    base_url="http://upstream/v1", wire="responses", context_window=300_000,
                    context_source="test", input_modalities=["text", "image"])
     monkeypatch.setattr(router, "load_routes", lambda: [routed])
-    cfg = SimpleNamespace(codex_home=tmp_path, providers=[], listen_host="127.0.0.1", listen_port=19999,
+    cfg = SimpleNamespace(codex_home=tmp_path, providers=[], openai_enabled=False, listen_host="127.0.0.1", listen_port=19999,
                           base_url="http://127.0.0.1:19999/v1")
 
     async def run():
@@ -113,7 +113,7 @@ def test_landing_shows_usage_without_leaking_token(tmp_path, monkeypatch):
     monkeypatch.setattr(router, "fetch_codex_usage", lambda auth: {
         "plan": "pro", "windows": [{"label": "Weekly limit", "left": 14, "reset_at": 1794973752, "seconds": 604800}],
         "credits": "55,121 credits", "resets": 2})
-    cfg = SimpleNamespace(codex_home=tmp_path, providers=[], listen_host="127.0.0.1", listen_port=19999,
+    cfg = SimpleNamespace(codex_home=tmp_path, providers=[], openai_enabled=False, listen_host="127.0.0.1", listen_port=19999,
                           base_url="http://127.0.0.1:19999/v1")
 
     async def run():
@@ -138,7 +138,7 @@ def test_overview_api_is_public_json_without_secrets(tmp_path, monkeypatch):
     monkeypatch.setattr(router, "router_token", lambda: "test-only-router-token")
     monkeypatch.setattr(router, "load_routes", lambda: [])
     monkeypatch.setattr(router, "fetch_codex_usage", lambda auth: {"plan": "pro", "windows": [], "credits": "5 credits", "resets": 0})
-    cfg = SimpleNamespace(codex_home=tmp_path, providers=[], listen_host="127.0.0.1", listen_port=19999,
+    cfg = SimpleNamespace(codex_home=tmp_path, providers=[], openai_enabled=False, listen_host="127.0.0.1", listen_port=19999,
                           base_url="http://127.0.0.1:19999/v1")
 
     async def run():

@@ -1,7 +1,7 @@
 """Find out which models are actually usable right now.
 
-- ChatGPT models: from the Codex login in $CODEX_HOME (auth.json) and the model list Codex
-  caches there (models_cache.json). Not logged in -> no GPT models.
+- ChatGPT models: fetched using the Codex login in $CODEX_HOME (auth.json), falling back
+  to models_cache.json if unavailable. Not logged in -> no GPT models.
 - Providers: GET {base_url}/models. Unreachable provider or model not served -> dropped.
   Context window: config value, else whatever /models reports (vLLM max_model_len, ...),
   else a conservative default with a warning.
@@ -123,11 +123,14 @@ def _openai_models(cfg: Config, auth: OpenAIAuth) -> list[dict[str, Any]]:
         models = json.loads(cache.read_text()).get("models") or []
     except (OSError, ValueError):
         pass
-    if not models and auth.mode == "chatgpt":
-        status, data = http_json("GET", f"{CHATGPT_BASE}/models?client_version=0.169.0", headers={
-            "authorization": f"Bearer {auth.access_token}", "chatgpt-account-id": auth.account_id or ""})
-        if status == 200 and isinstance(data, dict):
-            models = data.get("models") or []
+    if auth.mode == "chatgpt":
+        try:
+            status, data = http_json("GET", f"{CHATGPT_BASE}/models?client_version=0.169.0", headers={
+                "authorization": f"Bearer {auth.access_token}", "chatgpt-account-id": auth.account_id or ""})
+            if status == 200 and isinstance(data, dict) and isinstance(data.get("models"), list):
+                models = data["models"]
+        except (urllib.error.URLError, OSError, TimeoutError):
+            pass  # Keep cached models usable during network failures.
     # Real OpenAI slugs never contain "/"; such entries were cached from another gateway's catalog.
     models = [m for m in models if m.get("visibility", "list") == "list" and m.get("slug") and "/" not in m["slug"]]
     if cfg.openai_include:

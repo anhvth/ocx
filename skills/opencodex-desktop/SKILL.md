@@ -20,6 +20,9 @@ Repo: https://github.com/anhvth/opencodex-desktop (source in `~/projects/opencod
   block. Other providers speak `/responses` or `/chat/completions` (auto-detected).
 - The model picker and context window come from the catalog JSON the tool writes
   (`~/.local/state/opencodex-desktop/model-catalog.json`).
+- The router refreshes the live GPT catalog and providers every 60 seconds (Codex's GPT cache is the
+  offline fallback). Omit `openai.include` to discover new releases automatically. Restart Codex/Pi
+  to load catalog changes; a running Codex app-server keeps its old model list.
 - One router per machine. A Desktop chat on an SSH remote runs its app-server on the remote host,
   so the remote needs its own `start`.
 
@@ -81,8 +84,8 @@ config's model unless you pass `-m`.
    `scp` the wheel, then `uv tool install --force <wheel>` there.
 9. On NFS homes, `opencodex-desktop stop` before reinstalling, or uv fails with "Directory not
    empty / resource busy" (the running router holds `.nfs*` files). Then `start` again.
-10. After `start` (or a restart of the router), run `opencodex-desktop start` again on a host whose
-    vLLM was down: its models come back only after a new `start`.
+10. A recovered provider is re-added by the router's periodic health check. Restart Codex/Pi to load
+    the updated list, or run `opencodex-desktop start` to rediscover immediately.
 11. Claude needs an Anthropic **API key** (console.anthropic.com), not a Claude Pro/Max subscription.
     For an Anthropic-compatible gateway set `anthropic.base_url` (wire stays `anthropic`).
 12. Claude thinking budgets are capped to `max_tokens - 1024`; if `max_output_tokens` is tiny,

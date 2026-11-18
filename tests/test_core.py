@@ -513,6 +513,7 @@ def test_fold_system_messages():
 
 def test_context_caps(tmp_path, monkeypatch):
     from opencodex_desktop import discovery
+    monkeypatch.setattr(discovery, "http_json", lambda *a, **k: (503, {}))
     monkeypatch.delenv("CODEX_HOME", raising=False)
     home = tmp_path / "codex"
     home.mkdir()

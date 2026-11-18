@@ -77,7 +77,7 @@ class Router:
         timeout = aiohttp.ClientTimeout(total=None, sock_connect=20, sock_read=900)
         self.direct = aiohttp.ClientSession(trust_env=False, timeout=timeout, auto_decompress=True)
         self.proxied = aiohttp.ClientSession(trust_env=True, timeout=timeout, auto_decompress=True)
-        if self.cfg.providers and HEALTH_INTERVAL > 0:
+        if (self.cfg.providers or self.cfg.openai_enabled) and HEALTH_INTERVAL > 0:
             self.monitor = asyncio.create_task(self.watch_providers())
 
     async def on_cleanup(self, _app: web.Application) -> None:
@@ -88,7 +88,7 @@ class Router:
                 await s.close()
 
     async def watch_providers(self) -> None:
-        """Re-discover periodically; drop unreachable models from the catalog, re-add recovered ones.
+        """Re-discover periodically, including new GPT models and changed model metadata.
 
         Codex reads the catalog when an app-server/CLI session starts, so the change shows up in the
         next Codex session or Desktop relaunch; requests to a dropped model fail fast meanwhile.
@@ -101,8 +101,20 @@ class Router:
                 _log(f"health check failed: {e!r}")
                 continue
             new = {r.slug: r for r in d.routes}
-            if set(new) == set(self.routes):
+            from .codex_setup import CATALOG, build_catalog, write_catalog
+            catalog = build_catalog(d)
+            try:
+                previous = json.loads(CATALOG.read_text())
+            except (OSError, ValueError):
+                previous = {}
+            if new == self.routes and catalog == previous:
                 continue
+            old_gpt = {m["slug"] for m in previous.get("models", []) if "/" not in m["slug"]}
+            new_gpt = {m["slug"] for m in d.openai_models}
+            for slug in sorted(new_gpt - old_gpt):
+                _log(f"✓ {slug} added to the Codex model list")
+            for slug in sorted(old_gpt - new_gpt):
+                _log(f"⚠ {slug} removed from the Codex model list")
             for slug in sorted(set(self.routes) - set(new)):
                 _log(f"⚠ {slug} is no longer reachable; removed from the Codex model list")
             for slug in sorted(set(new) - set(self.routes)):
@@ -110,10 +122,9 @@ class Router:
             for line in out.splitlines():
                 if "⚠" in line or "✗" in line:
                     _log(line.strip())
-            from .codex_setup import build_catalog, write_catalog
             from .discovery import save_routes
             save_routes(d.routes)
-            write_catalog(build_catalog(d))
+            write_catalog(catalog)
             from .pi_setup import apply_pi_config
             try:
                 await asyncio.to_thread(apply_pi_config, self.cfg, d)

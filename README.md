@@ -100,7 +100,8 @@ Also supported (see [`examples/config.yaml`](examples/config.yaml) for all field
 - `anthropic` — built-in Claude provider: `api_key` / `api_key_env` (default `ANTHROPIC_API_KEY`) /
   `api_key_file`, `base_url` (any Anthropic-compatible gateway), `models: auto` or a list, `include`,
   `enabled`. Needs an Anthropic **API key**, not a Claude subscription.
-- `openai.include` — allow-list of GPT slugs to expose.
+- `openai.include` — optional allow-list of GPT slugs to expose. Omit it to include newly released GPT
+  models automatically.
 - Per provider: `enabled`, `headers`, `wire_api` (`responses`/`chat`/`anthropic`, auto-detected if omitted),
   and `include` — substring filters when `models: auto`.
 - Per model: `display_name`, `reasoning_efforts`, `default_effort`, `input_modalities`.
@@ -110,6 +111,10 @@ Also supported (see [`examples/config.yaml`](examples/config.yaml) for all field
 - **OpenAI auth**: reads `$CODEX_HOME/auth.json` (written by the Codex app or `codex login`), the same way
   Codex does. If you are signed in, your GPT models appear; the router forwards Codex's own auth header, so
   token refresh keeps working. If you are not, you get a warning and only the other providers are served.
+- **Model updates**: the router checks the live GPT catalog and providers every 60 seconds, falling back
+  to Codex's cached GPT list if the live catalog is unavailable. Changes update the generated catalog and
+  Pi configuration. Restart the Codex app (or `codex app-server daemon restart` for CLI/TUI) and Pi to
+  load an updated list; an `openai.include` allow-list still limits which GPT models appear.
 - **Unreachable provider / bad key / model not served**: you get a ✗ line and those models are **dropped**,
   so Codex never shows a model that cannot answer.
 - **Context window**: taken from the config if set, else from what the provider's `/models` reports (vLLM's
