@@ -250,11 +250,11 @@ def _discover_provider(p: ProviderCfg) -> tuple[list[Route], bool]:
             continue
         deepseek_v41 = p.name == "local-vllm" and m.id.lower().startswith("deepseek-ai/deepseek-v4.1")
         efforts = m.reasoning_efforts or (
-            ["low", "high", "xhigh", "max"]
+            ["low", "xhigh", "max"]
             if deepseek_v41
             else list(DEFAULT_EFFORTS)
         )
-        default = m.default_effort or ("medium" if "medium" in efforts else "high" if deepseek_v41 and "high" in efforts else efforts[-1])
+        default = m.default_effort or ("medium" if "medium" in efforts else "low" if deepseek_v41 and "low" in efforts else efforts[-1])
         max_out, display, modalities = m.max_output_tokens, m.display_name, m.input_modalities
         if wire == "anthropic":
             # Anthropic /models reports max_tokens (output) and display_name; Claude takes images.
