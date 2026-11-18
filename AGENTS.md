@@ -21,6 +21,70 @@ Every non-OpenAI model Codex sees is named `<provider>/<model-id>`:
   unknown `x/<model-id>` to the single route serving `<model-id>` (`resolve_alias`); keep that working.
   Don't add per-name alias tables.
 
+## Model capabilities and configuration ownership
+
+**`ocx start` owns generating and writing harness configuration.** Coding agents maintain the
+source configuration, capability rules and regression tests; do not manually patch each harness's
+live generated settings. For an operator-authorized local override, edit the ocx YAML, then run
+`ocx start` to regenerate. Preserve unrelated settings, credentials and the user's startup model.
+Do not restart active harness sessions or shared services just to refresh a picker without permission.
+
+### Source of truth and discovery
+
+- Source config: `~/.config/ocx/config.yaml` (respect configured/XDG paths and legacy installations).
+- Capability precedence: explicit per-model YAML (`reasoning_efforts`, `default_effort`) > verified
+  provider/model capability mapping > existing generic defaults for unknown models.
+- Keep verified entries keyed by provider + exact upstream model ID: different serving implementations
+  can support different efforts for the same model. This is the intended mapping policy; discovery
+  currently uses model-specific conditionals, not a general capability registry.
+- Store supported efforts and a default, not a second rejected-effort configuration list. Keep rejected
+  values as regression cases. A configured default must belong to the supported list.
+- Unknown-model defaults are **unverified**, not a claim of compatibility. When an option fails,
+  verify the upstream behavior, update the shared capability rule/config and add a regression test.
+  Do not invent a supported list from a model's name or duplicate it in each harness.
+- `/models` checks provider reachability and model presence, not successful inference. Context limits
+  are discovered/configured separately; unreachable providers and models below 32k are omitted.
+- There is no standard OpenAI-compatible per-model reasoning-capabilities endpoint. Use explicit
+  capability metadata when available; a generic OpenAPI enum is not model-specific evidence.
+  Do not add automatic inference probes during discovery. Existing wire-format detection can send
+  a small inference request when uncached; that is separate from capability verification.
+- Authorized direct API probes can verify accepted/rejected values. HTTP 200 alone does not prove
+  that an effort changes model behavior; inspect serving/template code for that stronger claim.
+
+### Generation and placement
+
+`ocx start` runs discovery, saves routes, builds the Codex catalog, and calls the Codex, Claude and
+Pi setup functions. Each adapter translates the same shared capabilities into its harness's format:
+
+| Consumer | Generated files and effort representation |
+|---|---|
+| Router | `$XDG_STATE_HOME/ocx/routes.json` (default `~/.local/state/ocx/routes.json`); route efforts/default used to normalize unsupported client values |
+| Codex CLI/Desktop | State directory's `model-catalog.json`, referenced by `$CODEX_HOME/config.toml`; `supported_reasoning_levels` and `default_reasoning_level` |
+| Pi | `$PI_CODING_AGENT_DIR/models.json` (default `~/.pi/agent/models.json`); `thinkingLevelMap`, with unsupported levels mapped to `null` |
+| Claude Code | `$CLAUDE_CONFIG_DIR/settings.json` (default `~/.claude/settings.json`); model-picker entries and per-model default `effortLevel`, not a complete supported-effort picker restriction |
+| Claude Desktop, third-party mode | `~/Library/Application Support/Claude-3p/configLibrary/`; gateway profile when that app directory exists on macOS |
+
+Existing installs may retain `~/.local/state/opencodex-desktop/`; use the resolved `STATE_DIR`, not
+an assumed new path. Pi config is generated only when its agent directory already exists. Other
+clients consume the router's API; do not claim every harness has generated local settings.
+
+Codex caches its catalog at app-server startup (see below). Pi reloads `models.json` when `/model`
+opens; reselect the model to use refreshed metadata. Generating config does not guarantee an already
+running client has refreshed its in-memory model.
+
+### Verified local DeepSeek behavior
+
+Direct checks against `http://127.0.0.1:7788/v1/responses` for
+`deepseek-ai/DeepSeek-V4.1-Flash-1017` accepted `none`, `low`, `high`, `xhigh`, `max`, and rejected
+`minimal`, `medium` with HTTP 400. The server's error explicitly lists `low`, `high`, `xhigh`, `max`
+and integer efforts 1–100 in `chat_template_kwargs` (integer values were not tested).
+
+**Do not remove `high` on the assumption that it is unsupported.** The earlier Pi/tmux test expecting
+`high` absent encoded a mistaken contract; capability tests must follow verified upstream behavior.
+These observations apply to that deployment, not every DeepSeek server. Choosing the default effort
+is policy; the API checks did not discover the server's default. Updating this document alone does
+not update discovery rules or regenerate installed harness configs.
+
 ## Router endpoints (one address, two API formats)
 
 `http://127.0.0.1:11111`; authenticated calls use the router token (`~/.local/state/ocx/token`

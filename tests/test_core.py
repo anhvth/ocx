@@ -88,8 +88,9 @@ def test_local_deepseek_v41_efforts(monkeypatch):
     provider = config.ProviderCfg(name="local-vllm", base_url="http://localhost/v1", models_auto=True)
     route = discovery._discover_provider(provider)[0][0]
     assert route.efforts == ["low", "high", "xhigh", "max"] and route.default_effort == "high"
-    assert sanitize_request({"model": route.slug, "reasoning": {"effort": "medium"}}, route)["reasoning"] == {"effort": "high"}
-    assert sanitize_request({"model": route.slug, "reasoning": {"effort": "high"}}, route)["reasoning"] == {"effort": "high"}
+    for requested, expected in [("high", "high"), ("medium", "high"), ("xhigh", "xhigh"), ("max", "max")]:
+        request = {"model": route.slug, "reasoning": {"effort": requested}}
+        assert sanitize_request(request, route)["reasoning"] == {"effort": expected}
 
 
 def test_effort_snaps_to_route_default():

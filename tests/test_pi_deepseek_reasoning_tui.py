@@ -17,8 +17,8 @@ from ocx import config, discovery, pi_setup
 
 
 @pytest.mark.skipif(os.environ.get("OCX_TMUX_RED_TEST") != "1", reason="opt-in real Pi/tmux test")
-def test_local_deepseek_effort_picker_does_not_offer_high(monkeypatch):
-    """Select local DeepSeek, /effort + Enter: high must not be a choice.
+def test_local_deepseek_effort_picker_offers_high(monkeypatch):
+    """Select local DeepSeek, /effort + Enter: high must be a choice.
 
     No persistence/restart claim; all config and session state is disposable.
     """
@@ -93,8 +93,8 @@ def test_local_deepseek_effort_picker_does_not_offer_high(monkeypatch):
         actual = re.findall(r"^\s*(?:[→›❯>]\s*)?(min|low|medium|high|xhigh|max|off|default)\s*$",
                             pane, re.MULTILINE)
         assert actual, f"SETUP FAILURE: no effort option rows parsed.\n{pane}"
-        assert "high" not in actual, (
-            f"Expected: high absent for local DeepSeek. Actual effort options: {actual}.\n{pane}")
+        assert "high" in actual, (
+            f"Expected: high available for local DeepSeek. Actual effort options: {actual}.\n{pane}")
     finally:
         transcript = tmux("capture-pane", "-pt", session, "-S", "-150", check=False)
         (scratch / "pane.log").write_text(transcript)
