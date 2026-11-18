@@ -18,8 +18,8 @@ ocx = "ocx.cli:main"
 opencodex-desktop = "ocx.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/anhvth/opencodex-desktop"
-Repository = "https://github.com/anhvth/opencodex-desktop"
+Homepage = "https://github.com/anhvth/ocx"
+Repository = "https://github.com/anhvth/ocx"
 
 [build-system]
 requires = ["hatchling"]

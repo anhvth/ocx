@@ -6,12 +6,14 @@
   ocx off        stop the router and put Codex back to its defaults
   ocx status     what is running and which models Codex sees
   ocx init       write an example config to ~/.config/ocx/config.yaml
+  ocx setup      guided walk-through: config, provider keys, login checks, start
   ocx update     install and activate the current published version
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import signal
@@ -31,7 +33,7 @@ from .updates import latest_version, version_parts
 PIDFILE = STATE_DIR / "router.pid"
 LOGFILE = STATE_DIR / "router.log"
 EXAMPLE = Path(__file__).with_name("example_config.yaml")
-UPSTREAM_PACKAGE = "git+https://github.com/anhvth/opencodex-desktop.git@main"
+UPSTREAM_PACKAGE = "https://github.com/anhvth/ocx/archive/refs/heads/main.tar.gz"
 
 
 def _check_update() -> None:
@@ -319,6 +321,102 @@ def cmd_init(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _ask_key_file(path: Path, prompt: str) -> None:
+    """Ask for an API key with hidden input and save it 0600. Empty input keeps the existing file."""
+    if path.exists():
+        ui.ok(f"key file exists: {path} (Enter keeps it)")
+    key = getpass.getpass(prompt).strip()
+    if not key:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(key + "\n")
+    path.chmod(0o600)
+    ui.ok(f"saved {path} (…{key[-4:]})")
+
+
+def cmd_setup(cfg: Config, args: argparse.Namespace) -> int:
+    ui.head(f"ocx setup {__version__}")
+    if not sys.stdin.isatty():
+        ui.err("setup is interactive; run it in a terminal (or use `ocx init` + edit the YAML)")
+        return 1
+
+    ui.head("1/4 Config")
+    path = cfg.path
+    if path is None:
+        path = Path(args.config).expanduser() if args.config else DEFAULT_CONFIG
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(EXAMPLE.read_text())
+        ui.ok(f"wrote {path} from the example config")
+    else:
+        ui.ok(f"using {path}")
+
+    ui.head("2/4 Codex login (ChatGPT models)")
+    from .discovery import http_json, read_openai_auth
+    if read_openai_auth(cfg.codex_home).mode == "none":
+        ui.warn(f"not logged in to Codex ({cfg.codex_home}); run `codex login` or sign in in the Codex app")
+    else:
+        ui.ok("Codex login found; GPT models come from it")
+
+    ui.head("3/4 Provider keys")
+    import yaml
+    from . import config as config_mod
+    doc = yaml.safe_load(path.read_text()) or {}
+    # Read the YAML directly: load() raises on a missing key file, which setup is here to fix.
+    raw_providers = dict(doc.get("providers") or {})
+    if doc.get("anthropic"):
+        raw_providers["anthropic"] = doc["anthropic"]
+    for name, raw in raw_providers.items():
+        raw = raw or {}
+        base_url = str(raw.get("base_url") or (config_mod.ANTHROPIC_BASE if name == "anthropic" else ""))
+        if raw.get("enabled") is False:
+            ui.info(f"{name}: disabled in config; skipped")
+            continue
+        if raw.get("api_key_file"):
+            key_path = Path(os.path.expandvars(str(raw["api_key_file"]))).expanduser()
+            if key_path.exists():
+                ui.ok(f"{name}: key file {key_path}")
+            else:
+                _ask_key_file(key_path, f"    {name} API key (hidden, Enter to skip): ")
+        elif raw.get("api_key") or raw.get("api_key_env") or "localhost" in base_url or "127.0.0.1" in base_url:
+            ui.ok(f"{name}: key configured")
+        else:
+            ui.warn(f"{name}: no key configured; add api_key_file/api_key_env under it in {path}")
+        if not base_url:
+            ui.warn(f"{name}: no base_url in {path}; skipped")
+            continue
+        key = None
+        if raw.get("api_key_file"):
+            key_path = Path(os.path.expandvars(str(raw["api_key_file"]))).expanduser()
+            if key_path.exists():
+                key = key_path.read_text().strip()
+        elif raw.get("api_key"):
+            key = str(raw["api_key"]).strip()
+        elif raw.get("api_key_env"):
+            key = os.environ.get(str(raw["api_key_env"]))
+        headers = dict(raw.get("headers") or {})
+        if key:
+            if name == "anthropic":
+                headers.setdefault("x-api-key", key)
+                headers.setdefault("anthropic-version", "2023-06-01")
+            else:
+                headers["authorization"] = f"Bearer {key}"
+        try:
+            code, _ = http_json("GET", f"{base_url}/models", headers=headers, timeout=10)
+            if code == 200:
+                ui.ok(f"{name}: reachable, key accepted")
+            else:
+                ui.warn(f"{name}: /models HTTP {code}" + (" (wrong key or plan?)" if code in (401, 403) else ""))
+        except OSError as e:
+            ui.warn(f"{name}: {getattr(e, 'reason', e)}")
+
+    ui.head("4/4 Start")
+    answer = input("    Run `ocx start` now? [Y/n] ").strip().lower()
+    if answer in ("", "y", "yes"):
+        return cmd_start(load(str(path)), args)
+    ui.info(f"Run `ocx start` when ready. Edit {path} any time, then start again.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="ocx", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -329,6 +427,7 @@ def main(argv: list[str] | None = None) -> int:
     for name, h in [("off", "stop router and restore Codex defaults"),
                     ("stop", "stop the router only"), ("status", "show state"),
                     ("serve", "run the router in the foreground"),
+                    ("setup", "guided walk-through: config, keys, login checks, start"),
                     ("update", "install and activate the current published version")]:
         sub.add_parser(name, help=h)
     p = sub.add_parser("init", help="write an example config")
@@ -347,7 +446,7 @@ def main(argv: list[str] | None = None) -> int:
         ui.err(f"config error: {e}")
         return 2
     return {"start": cmd_start, "off": cmd_off, "stop": cmd_stop, "status": cmd_status,
-            "serve": cmd_serve}[cmd](cfg, args)
+            "serve": cmd_serve, "setup": cmd_setup}[cmd](cfg, args)
 
 
 if __name__ == "__main__":

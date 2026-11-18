@@ -5,7 +5,7 @@ from urllib.request import urlopen
 import tomlkit
 from tomlkit.exceptions import ParseError
 
-UPSTREAM_VERSION = "https://raw.githubusercontent.com/anhvth/opencodex-desktop/main/pyproject.toml"
+UPSTREAM_VERSION = "https://raw.githubusercontent.com/anhvth/ocx/main/pyproject.toml"
 
 
 def version_parts(version: str) -> tuple[int, ...]:

@@ -5,7 +5,7 @@ description: Set up, change, debug or turn off custom models (Alibaba Qwen, Anth
 
 # ocx
 
-Repo: https://github.com/anhvth/opencodex-desktop (source in `~/projects/opencodex-desktop`).
+Repo: https://github.com/anhvth/ocx (source in `~/projects/ocx`).
 
 ## Mental model (read first)
 
@@ -45,17 +45,19 @@ See `examples/config.yaml` in the repo.
 
 | want | do |
 |---|---|
+| walk a user through setup | `ocx setup` (interactive): config from the example if missing, Codex login check, hidden prompts for missing `api_key_file` keys (saved 0600), per-provider `/models` check, then offers `start` |
 | first setup / after any change | `ocx start`, then the user restarts the Codex app |
 | update the installed package | `ocx update` (installs and restarts the router; when coming from 0.4.4 or earlier, run `ocx start` once afterward) |
 | add a model/provider | edit the YAML, `start` again |
+| add Alibaba Token Plan Qwen models | save the Token Plan key to `~/.config/claude-alibaba/token` (chmod 600; a Coding Plan or DashScope key is rejected), `providers.alibaba` with `base_url: https://token-plan.maas.qwencloudapi.com/compatible-mode/v1`, `api_key_file:` that path, `anthropic_url: .../apps/anthropic/v1`, then `start`. No interactive login; ✓ per model = key works, 401/403 = wrong key or plan |
 | add Claude models | set `$ANTHROPIC_API_KEY` (or `anthropic: {api_key_file: ...}`), `start` again; pick `anthropic/claude-*` |
 | same models in Claude Code (`claude`, `cl`) / Claude app | nothing extra: `start` writes `~/.claude/settings.json` + the app's gateway profile; add `anthropic_url:` to providers that have one |
 | fix a context window | set `context_window` on the model (vLLM reports it itself with `models: auto`) |
 | back to plain Codex | `ocx off` (stops router, removes the 3 keys); if a routed model was selected, pick a built-in one |
 | what is going on | `ocx status`; log `~/.local/state/ocx/router.log` |
-| new machine | `uvx --from git+https://github.com/anhvth/opencodex-desktop ocx start` |
+| new machine | `uvx --from https://github.com/anhvth/ocx/archive/refs/heads/main.tar.gz ocx start` |
 
-Not installed? `uv tool install git+https://github.com/anhvth/opencodex-desktop` (or run via `uvx`).
+Not installed? `uv tool install https://github.com/anhvth/ocx/archive/refs/heads/main.tar.gz` (or run via `uvx`).
 For the old uv package, use the README migration to avoid a legacy executable conflict.
 Existing config and router state paths can remain under `opencodex-desktop`.
 Never print API keys; show the last 4 characters at most.
@@ -63,7 +65,7 @@ Never print API keys; show the last 4 characters at most.
 ## Verify like the Desktop does
 
 ```bash
-S=~/projects/opencodex-desktop/skills/ocx/scripts
+S=~/projects/ocx/skills/ocx/scripts
 # fresh app-server with the Desktop's bundled codex + desktop flags, two turns
 python3 $S/app_server_turn.py stdio /Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex alibaba/qwen3.8-max --desktop-flags
 # live Desktop app-server (creates a visible test thread)
@@ -97,8 +99,11 @@ config's model unless you pass `-m`.
     thinking is silently disabled. Forced tool use (`tool_choice: required`) is downgraded to auto
     while thinking is on (Anthropic rejects the combination).
 13. The `codex` TUI (and `cdx`) attaches to a long-lived app-server daemon that loaded the catalog when it
-    started (can be days old). New models missing from `/model` → quit codex sessions, then
-    `codex app-server daemon restart`. The picker shows ~8 rows; custom models come just after the leading GPT model.
+    started (can be days old). With the auto-restart change, `ocx start` restarts a stale running daemon
+    itself (socket mtime older than the catalog); on failure it prints `codex app-server daemon restart`.
+    That restart can exceed the 60s timeout when sessions are open — run it manually and verify the socket
+    mtime is newer than the catalog. It disconnects open CLI sessions, including the agent's own chat.
+    The picker shows ~8 rows; custom models come just after the leading GPT model.
 14. Claude clients: the router's Claude face is `/v1/messages` (+ `count_tokens`, and `/v1/models` with an
     `anthropic-version` header), authenticated by the router token (`x-ocx-token` /
     `x-api-key` / Bearer). Claude Code sends `role: system` entries inside `messages`; they are folded

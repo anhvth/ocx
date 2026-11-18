@@ -40,7 +40,7 @@ def test_update_installs_and_starts_published_nondowngrades(
     if install_code is not None:
         wanted.append([
             "uv", "tool", "install", "--force", "--refresh",
-            "git+https://github.com/anhvth/opencodex-desktop.git@main",
+            "https://github.com/anhvth/ocx/archive/refs/heads/main.tar.gz",
         ])
     if install_code == 0:
         wanted += [["uv", "tool", "dir", "--bin"], ["/tmp/tool bin/ocx", *config_args, "start"]]
