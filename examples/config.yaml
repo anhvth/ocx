@@ -24,7 +24,6 @@ openai:
 # max_context_window: 300000
 
 # Model selected in Codex after start (optional). Format: <provider>/<model> or a GPT slug.
-# default_model: alibaba/qwen4-max
 
 # Claude models (anthropic/claude-*). Enabled automatically when $ANTHROPIC_API_KEY is set;
 # uncomment to configure explicitly. Needs an Anthropic API key (not a Claude subscription).

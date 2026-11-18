@@ -78,9 +78,12 @@ def _custom_entry(template: dict[str, Any], r: Route, priority: int) -> dict[str
 def build_catalog(d: Discovery) -> dict[str, Any]:
     models = [copy.deepcopy(m) for m in d.openai_models]
     template = d.openai_models[0] if d.openai_models else FALLBACK_TEMPLATE
-    # Lower priority sorts first. Codex's /model picker shows ~8 rows, so custom models go on top;
-    # otherwise they hide below the GPT list.
     first = min([m.get("priority", 0) for m in models] or [0]) - len(d.routes)
+    if d.routes:
+        # Codex uses picker priority for its automatic startup model too.
+        visible = [m for m in models if m.get("visibility", "list") == "list"]
+        if visible:
+            min(visible, key=lambda m: m.get("priority", 0))["priority"] = first - 1
     models += [_custom_entry(template, r, first + i) for i, r in enumerate(d.routes)]
     return {"models": models}
 
@@ -133,18 +136,6 @@ def apply_codex_config(cfg: Config, d: Discovery, catalog_path: Path) -> None:
         block["requires_openai_auth"] = d.openai.mode == "chatgpt"
         block["supports_websockets"] = False
 
-    slugs = [m["slug"] for m in d.openai_models] + [r.slug for r in d.routes]
-    current = doc.get("model")
-    wanted = cfg.default_model
-    if wanted and wanted not in slugs:
-        ui.warn(f"default_model {wanted} is not available; ignoring it")
-        wanted = None
-    if wanted and current != wanted:
-        doc["model"] = wanted
-    elif current not in slugs and slugs:
-        doc["model"] = slugs[0]
-        ui.warn(f"current model {current!r} is not available; switched the default to {slugs[0]}")
-
     after = tomlkit.dumps(doc)
     if after == before:
         ui.ok(f"{path} already up to date")
@@ -155,7 +146,7 @@ def apply_codex_config(cfg: Config, d: Discovery, catalog_path: Path) -> None:
     ui.ok(f"updated {path}" + (f" (backup: {bak.name})" if bak else ""))
 
 
-def restore_codex_config(cfg: Config, routed_slugs: set[str] | None = None) -> None:
+def restore_codex_config(cfg: Config) -> None:
     path = cfg.codex_home / "config.toml"
     if not path.exists():
         ui.info(f"{path} does not exist; nothing to restore")
@@ -177,10 +168,6 @@ def restore_codex_config(cfg: Config, routed_slugs: set[str] | None = None) -> N
             del providers[provider_id]
         if not providers:
             del doc["model_providers"]
-        changed = True
-    if doc.get("model") in (routed_slugs or set()):
-        ui.info(f"model {doc['model']} only exists through the router; reset to Codex's default model")
-        del doc["model"]
         changed = True
     if not changed:
         ui.ok(f"{path} has no ocx settings")

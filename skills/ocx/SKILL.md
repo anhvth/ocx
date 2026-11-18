@@ -12,6 +12,7 @@ Repo: https://github.com/anhvth/opencodex-desktop (source in `~/projects/opencod
 - The Codex Desktop app-server reads ONLY `$CODEX_HOME/config.toml` (no `--profile`). So the
   provider must be in the base config. `ocx start` writes exactly three things there:
   `model_provider`, `model_catalog_json`, `[model_providers.ocx]` (backup first).
+  OCX does not set startup models for Codex, Pi, or Claude Code; choose them in the clients.
 - The router (`127.0.0.1:11111`) sends `gpt-*` to ChatGPT with Codex's own auth header (fast mode
   passes through), and `<provider>/<model>` to that provider after sanitizing the request.
 - `anthropic/claude-*` uses the native Anthropic Messages API (`x-api-key`, `/v1/messages`): the
@@ -33,7 +34,7 @@ Repo: https://github.com/anhvth/opencodex-desktop (source in `~/projects/opencod
 (list of candidates; `$CODEX_HOME` wins), `listen`, `openai.{enabled,include,exclude_regex,context_window: {slug: cap}}`, `max_context_window` (cap for every model),
 `anthropic.{enabled, api_key|api_key_env|api_key_file, base_url, models, include, exclude_regex}` (built-in Claude
 provider; key defaults to `$ANTHROPIC_API_KEY`, base_url to `https://api.anthropic.com/v1`),
-`default_model`, `claude_app.ssh_hosts` (Claude app SSH sessions via a public tunnel),
+`claude_app.ssh_hosts` (Claude app SSH sessions via a public tunnel),
 `providers.<name>.{base_url, api_key|api_key_env|api_key_file, models: auto|[...], include, exclude_regex, wire_api,
 headers, enabled, anthropic_url}` (`wire_api: responses|chat|anthropic`; `anthropic_url` = the
 provider's Anthropic Messages endpoint, needed for its models to show up in Claude clients), per model `{context_window,
@@ -50,7 +51,7 @@ See `examples/config.yaml` in the repo.
 | add Claude models | set `$ANTHROPIC_API_KEY` (or `anthropic: {api_key_file: ...}`), `start` again; pick `anthropic/claude-*` |
 | same models in Claude Code (`claude`, `cl`) / Claude app | nothing extra: `start` writes `~/.claude/settings.json` + the app's gateway profile; add `anthropic_url:` to providers that have one |
 | fix a context window | set `context_window` on the model (vLLM reports it itself with `models: auto`) |
-| back to plain Codex | `ocx off` (stops router, removes the 3 keys, resets a routed `model`) |
+| back to plain Codex | `ocx off` (stops router, removes the 3 keys); if a routed model was selected, pick a built-in one |
 | what is going on | `ocx status`; log `~/.local/state/ocx/router.log` |
 | new machine | `uvx --from git+https://github.com/anhvth/opencodex-desktop ocx start` |
 
@@ -97,7 +98,7 @@ config's model unless you pass `-m`.
     while thinking is on (Anthropic rejects the combination).
 13. The `codex` TUI (and `cdx`) attaches to a long-lived app-server daemon that loaded the catalog when it
     started (can be days old). New models missing from `/model` → quit codex sessions, then
-    `codex app-server daemon restart`. The picker shows ~8 rows; custom models are sorted first.
+    `codex app-server daemon restart`. The picker shows ~8 rows; custom models come just after the leading GPT model.
 14. Claude clients: the router's Claude face is `/v1/messages` (+ `count_tokens`, and `/v1/models` with an
     `anthropic-version` header), authenticated by the router token (`x-ocx-token` /
     `x-api-key` / Bearer). Claude Code sends `role: system` entries inside `messages`; they are folded

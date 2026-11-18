@@ -44,8 +44,8 @@ login instead. Keep accepting `x-opencodex-token` and preserve provider IDs used
   `codex app-server daemon restart` for the CLI/TUI, and on SSH remotes kill the remote app-server so
   the Desktop respawns it. A stale app-server shows old slugs; that isn't a naming bug.
 - Custom catalog entries need `model_messages` (or `base_instructions`), or Codex refuses the catalog.
-- The TUI `/model` picker shows ~8 rows sorted by `priority`; custom models get lower priorities so they
-  are listed first.
+- Codex uses `priority` for both the TUI `/model` picker (which shows ~8 rows) and automatic model
+  selection. Keep the leading GPT model first and custom models immediately below it.
 - Models below 32k context, or from an unreachable provider, are not listed (warning, not error).
 - Codex sends its own item types in `input` (Desktop sub-agents add `agent_message`). Lenient providers
   (Alibaba) ignore them, but vLLM rejects the whole request ("N validation errors ... EasyInputMessageParam").

@@ -74,7 +74,6 @@ class Config:
     provider_id: str
     openai_enabled: bool
     openai_include: list[str]
-    default_model: str | None
     providers: list[ProviderCfg]
     # Claude app SSH sessions: ssh aliases allowed (non-empty => the router gets a public tunnel)
     claude_ssh_hosts: list[str] = field(default_factory=list)
@@ -249,7 +248,6 @@ def load(path: str | os.PathLike[str] | None = None) -> Config:
         provider_id=str(raw.get("provider_id", DEFAULT_PROVIDER_ID)),
         openai_enabled=openai.get("enabled", True) is not False,
         openai_include=list(openai.get("include") or []),
-        default_model=raw.get("default_model"),
         providers=providers,
         claude_ssh_hosts=[str(h) for h in ((raw.get("claude_app") or {}).get("ssh_hosts") or [])],
         max_context_window=int(raw["max_context_window"]) if raw.get("max_context_window") else None,

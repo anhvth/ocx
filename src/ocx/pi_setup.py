@@ -1,4 +1,4 @@
-"""Keep Pi's scoped model picker on the same discovery results as Codex."""
+"""Register the same discovered models in Pi without setting its startup model or scope."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from .discovery import Discovery
 from .local_settings import managed_local_link
 
 PROVIDER = DEFAULT_PROVIDER_ID
-SETTINGS_KEYS = ("enabledModels", "defaultProvider", "defaultModel")
 
 
 def agent_home() -> Path:
@@ -68,60 +67,69 @@ def _model(slug: str, context: int, output: int | None, modalities: list[str], e
                                  for level in ("off", "minimal", "low", "medium", "high", "xhigh", "max")}}
 
 
+def _restore_legacy_scope(home: Path, providers: dict, backups: dict) -> None:
+    if not any("settings" in saved for saved in backups.values()):
+        return
+    path = home / "settings.json"
+    settings = _read(path)
+    if "enabledModels" not in settings:
+        return
+    for provider in backups:
+        rows = providers.get(provider, {}).get("models", [])
+        # Only undo a scope that still matches the old generated list.
+        if rows and settings["enabledModels"] == [f"{provider}/{row['id']}" for row in rows]:
+            original = next(reversed(backups.values())).get("settings", {})  # Oldest backup is last.
+            settings.pop("enabledModels")
+            if "enabledModels" in original:
+                settings["enabledModels"] = original["enabledModels"]
+            _write(path, settings)
+            return
+
+
 def apply_pi_config(cfg: Config, d: Discovery) -> None:
     home = agent_home()
     if not home.is_dir():
         return  # Do not create Pi configuration on machines that do not use Pi.
-    models_path, settings_path = home / "models.json", home / "settings.json"
-    models, settings = _read(models_path), _read(settings_path)
+    models_path = home / "models.json"
+    models = _read(models_path)
     providers = models.setdefault("providers", {})
-    backup = home / f"{PROVIDER}-backup.json"
-    legacy_backup = home / f"{LEGACY_PROVIDER_ID}-backup.json"
-    if not backup.exists():
-        _write(backup, {"provider": providers.get(PROVIDER),
-                        "settings": {k: settings[k] for k in SETTINGS_KEYS if k in settings}})
     router_token()
+    backups = _read_backups(home)
+    _restore_legacy_scope(home, providers, backups)
+    for provider, saved in backups.items():
+        if "settings" in saved:
+            _write(home / f"{provider}-backup.json", {"provider": saved["provider"]})
+    if PROVIDER not in backups:
+        _write(home / f"{PROVIDER}-backup.json", {"provider": providers.get(PROVIDER)})
     rows = build_models(d)
     providers[PROVIDER] = {"name": PROVIDER, "baseUrl": cfg.base_url,
                            "api": "openai-responses", "apiKey": f"!cat {shlex.quote(str(TOKEN_FILE))}", "models": rows}
-    if legacy_backup.exists() and LEGACY_PROVIDER_ID in providers:
+    if LEGACY_PROVIDER_ID in backups and LEGACY_PROVIDER_ID in providers:
         providers[LEGACY_PROVIDER_ID] = providers[PROVIDER].copy()  # Old Pi sessions store the provider ID.
-    slugs = [m["id"] for m in rows]
-    # exact ids: Pi's "*" does not match "/", so "ocx/*" would hide alibaba/... models
-    settings["enabledModels"] = [f"{PROVIDER}/{s}" for s in slugs]
-    current = settings.get("defaultModel")
-    if current not in slugs:
-        current = cfg.default_model if cfg.default_model in slugs else next(iter(slugs), None)
-    settings["defaultProvider"] = PROVIDER
-    if current:
-        settings["defaultModel"] = current
     _write(models_path, models)
-    _write(settings_path, settings)
-    ui.ok(f"updated {models_path} ({len(rows)} models; /model defaults to this project's list)")
+    ui.ok(f"updated {models_path} ({len(rows)} models)")
+
+
+def _read_backups(home: Path) -> dict:
+    return {provider: _read(path) for provider in (PROVIDER, LEGACY_PROVIDER_ID)
+            if (path := home / f"{provider}-backup.json").exists()}
 
 
 def restore_pi_config(cfg: Config) -> None:
     home = agent_home()
-    backups = {provider: home / f"{provider}-backup.json" for provider in (PROVIDER, LEGACY_PROVIDER_ID)
-               if (home / f"{provider}-backup.json").exists()}
+    backups = _read_backups(home)
     if not backups:
         return
-    models_path, settings_path = home / "models.json", home / "settings.json"
-    models, settings = _read(models_path), _read(settings_path)
+    models_path = home / "models.json"
+    models = _read(models_path)
     providers = models.get("providers", {})
-    saved_settings = {}
-    for provider, backup in backups.items():
-        saved = _read(backup)
+    _restore_legacy_scope(home, providers, backups)
+    for provider, saved in backups.items():
         if saved["provider"] is None:
             providers.pop(provider, None)
         else:
             providers[provider] = saved["provider"]
-        saved_settings = saved["settings"]  # A legacy backup predates the rename.
-    for key in SETTINGS_KEYS:
-        settings.pop(key, None)
-    settings.update(saved_settings)
     _write(models_path, models)
-    _write(settings_path, settings)
-    for backup in backups.values():
-        backup.unlink()
-    ui.ok(f"restored Pi's previous model scope and defaults in {home}")
+    for provider in backups:
+        (home / f"{provider}-backup.json").unlink()
+    ui.ok(f"restored Pi's previous model registry in {home}")

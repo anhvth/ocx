@@ -86,7 +86,7 @@ installs the package. Restart Codex and Pi when needed to reload model lists.
 | command | what it does |
 |---|---|
 | `start` (default) | reads the YAML, checks every provider, configures Codex, Claude and Pi, and (re)starts the router in the background |
-| `off` | stops the router, removes its Codex/Claude settings, and restores Pi's previous model scope and defaults |
+| `off` | stops the router, removes its Codex/Claude settings, and restores Pi's previous model registry |
 | `status` | checks the GPT model list and shows catalog gaps, exclusions, and routed models |
 | `update` | installs from GitHub, refreshes managed client config, and (re)starts the router |
 | `stop` | stops only the router (Codex stays pointed at it) |

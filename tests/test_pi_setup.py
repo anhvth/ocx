@@ -22,11 +22,11 @@ def test_pi_settings_symlink_survives_sync_and_restore(tmp_path, monkeypatch):
     target.write_text('{"defaultModel": "gpt-test"}\n')
     link = home / "settings.json"
     link.symlink_to(target)
-    cfg = SimpleNamespace(base_url="http://localhost:12345/v1", default_model="gpt-test")
+    cfg = SimpleNamespace(base_url="http://localhost:12345/v1")
     discovery = Discovery(OpenAIAuth("chatgpt"), [{"slug": "gpt-test", "context_window": 200000}], [])
     pi_setup.apply_pi_config(cfg, discovery)
     assert link.is_symlink()
-    assert json.loads(target.read_text())["enabledModels"] == ["ocx/gpt-test"]
+    assert target.read_text() == '{"defaultModel": "gpt-test"}\n'
     pi_setup.restore_pi_config(cfg)
     assert link.is_symlink()
     assert json.loads(target.read_text()) == {"defaultModel": "gpt-test"}
@@ -43,7 +43,7 @@ def test_pi_sync_restore(tmp_path, monkeypatch):
     models = {"providers": {"old": {"apiKey": "secret", "models": [{"id": "old"}]}}}
     (home / "settings.json").write_text(json.dumps(settings))
     (home / "models.json").write_text(json.dumps(models))
-    cfg = SimpleNamespace(base_url="http://localhost:12345/v1", default_model="vendor/model")
+    cfg = SimpleNamespace(base_url="http://localhost:12345/v1")
     route = Route(slug="vendor/model", provider="vendor", upstream_model="model", base_url="http://x",
                   wire="chat", context_window=100000, context_source="test", max_output_tokens=32000)
     d = Discovery(OpenAIAuth("chatgpt"), [{"slug": "gpt-test", "context_window": 200000}], [route])
@@ -57,17 +57,17 @@ def test_pi_sync_restore(tmp_path, monkeypatch):
     assert [m["id"] for m in provider["models"]] == ["gpt-test", "vendor/model"]
     assert provider["models"][1]["maxTokens"] == 32000
     assert provider["models"][1]["thinkingLevelMap"]["high"] == "high"
-    assert json.loads((home / "settings.json").read_text())["enabledModels"] == ["ocx/gpt-test", "ocx/vendor/model"]
-    # Re-discovery replaces the managed list; unrelated edits survive off.
+    assert json.loads((home / "settings.json").read_text()) == settings
+    # Pi's own model selection survives discovery removing that model, and off.
+    updated = {**settings, "defaultProvider": "ocx", "defaultModel": "vendor/model"}
+    (home / "settings.json").write_text(json.dumps(updated))
     pi_setup.apply_pi_config(cfg, Discovery(d.openai, d.openai_models, []))
     result = json.loads((home / "models.json").read_text())
     assert len(result["providers"][pi_setup.PROVIDER]["models"]) == 1
-    updated = json.loads((home / "settings.json").read_text())
-    updated["theme"] = "light"
-    (home / "settings.json").write_text(json.dumps(updated))
+    assert json.loads((home / "settings.json").read_text()) == updated
     pi_setup.restore_pi_config(cfg)
     assert json.loads((home / "models.json").read_text()) == models
-    assert json.loads((home / "settings.json").read_text()) == {**settings, "theme": "light"}
+    assert json.loads((home / "settings.json").read_text()) == updated
     pi_setup.restore_pi_config(cfg)
 
 

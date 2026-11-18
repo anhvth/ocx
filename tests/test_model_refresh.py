@@ -10,7 +10,7 @@ from ocx import codex_setup, config, discovery, pi_setup, router
 def model_config(tmp_path):
     return config.Config(path=None, codex_home=tmp_path, listen_host="127.0.0.1", listen_port=0,
                          provider_id="ocx", openai_enabled=True, openai_include=[],
-                         default_model=None, providers=[])
+                         providers=[])
 
 
 @pytest.mark.parametrize("failure", [None, 401, 503, "offline", "malformed"])

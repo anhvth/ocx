@@ -63,24 +63,35 @@ def test_codex_keeps_legacy_provider_for_resumed_threads(tmp_path, monkeypatch):
     assert set(doc["model_providers"]) == {"unrelated"}
 
 
-def test_pi_alias_and_original_backup_survive_rename(tmp_path, monkeypatch):
+@pytest.mark.parametrize("custom_scope", [False, True])
+def test_pi_alias_and_original_backup_survive_rename(tmp_path, monkeypatch, custom_scope):
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
     monkeypatch.setattr(pi_setup, "router_token", lambda: "test")
     models, settings = (tmp_path / n for n in ("models.json", "settings.json"))
-    models.write_text(json.dumps({"providers": {"opencodex-desktop": {"baseUrl": "old-managed"},
-                                                 "other": {"baseUrl": "keep"}}}))
-    settings.write_text(json.dumps({"defaultProvider": "opencodex-desktop", "theme": "dark"}))
+    models.write_text(json.dumps({"providers": {
+        "opencodex-desktop": {"baseUrl": "old-managed", "models": [{"id": "gpt-test"}]},
+        "other": {"baseUrl": "keep"},
+    }}))
+    scope = ["mine/*"] if custom_scope else ["opencodex-desktop/gpt-test"]
+    current = {"defaultProvider": "opencodex-desktop", "defaultModel": "gpt-test", "theme": "dark"}
+    settings.write_text(json.dumps({**current, "enabledModels": scope}))
     legacy_backup = tmp_path / "opencodex-desktop-backup.json"
-    legacy_backup.write_text(json.dumps({"provider": None, "settings": {"defaultProvider": "other"}}))
-    cfg = SimpleNamespace(base_url="http://127.0.0.1:19001/v1", default_model=None)
+    legacy_backup.write_text(json.dumps({"provider": None, "settings": {
+        "defaultProvider": "other", "enabledModels": ["other/*"],
+    }}))
+    cfg = SimpleNamespace(base_url="http://127.0.0.1:19001/v1")
     d = Discovery(OpenAIAuth("chatgpt"), [{"slug": "gpt-test"}], [])
     pi_setup.apply_pi_config(cfg, d)
     providers = json.loads(models.read_text())["providers"]
     assert providers["ocx"] == providers["opencodex-desktop"]
-    assert json.loads(settings.read_text())["enabledModels"] == ["ocx/gpt-test"]
+    assert json.loads(settings.read_text()) == {**current, "enabledModels": scope if custom_scope else ["other/*"]}
+    # A new Pi scope may coincide with the generated list; subsequent sync/off leave it alone.
+    current["enabledModels"] = ["ocx/gpt-test"]
+    settings.write_text(json.dumps(current))
+    pi_setup.apply_pi_config(cfg, d)
     pi_setup.restore_pi_config(cfg)
     assert json.loads(models.read_text()) == {"providers": {"other": {"baseUrl": "keep"}}}
-    assert json.loads(settings.read_text()) == {"defaultProvider": "other", "theme": "dark"}
+    assert json.loads(settings.read_text()) == current
     assert not legacy_backup.exists() and not (tmp_path / "ocx-backup.json").exists()
 
 

@@ -196,7 +196,7 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     ui.info("Restart the Codex app to pick up the model list. The codex CLI attaches to a background")
     ui.info("daemon that keeps its old list: `codex app-server daemon restart` (closes open codex sessions).")
     ui.info("Claude Code (`claude`, `cl`) sees the new models in /model right away.")
-    ui.info("Pi: restart to refresh the scoped /model list; resumed sessions can switch with /model.")
+    ui.info("Pi: restart to refresh the model list; resumed sessions can switch with /model.")
     ui.info("Turn it off any time with: ocx off")
     return 0
 
@@ -204,10 +204,9 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
 def cmd_off(cfg: Config, args: argparse.Namespace) -> int:
     from .claude_setup import restore_claude_config
     from .codex_setup import restore_codex_config
-    from .discovery import load_routes
     ui.head("ocx off")
     _stop_router(cfg)
-    restore_codex_config(cfg, {r.slug for r in load_routes()})
+    restore_codex_config(cfg)
     restore_claude_config(cfg)
     from .pi_setup import restore_pi_config
     restore_pi_config(cfg)

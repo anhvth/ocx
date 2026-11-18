@@ -47,7 +47,7 @@ def test_openai_drops_foreign_reasoning(tmp_path, monkeypatch, tail, gateway):
         mode="chatgpt", access_token="openai-test", upstream="http://upstream/v1"))
     cfg = config.Config(path=None, codex_home=tmp_path, listen_host="127.0.0.1", listen_port=0,
                         provider_id="ocx", openai_enabled=True, openai_include=[],
-                        default_model=None, providers=[])
+                        providers=[])
     router = router_mod.Router(cfg)
     native = {"type": "reasoning", "id": "rs_native", "encrypted_content": "opaque", "summary": []}
     idless = {"type": "reasoning", "encrypted_content": "opaque", "summary": []}
@@ -113,7 +113,7 @@ def test_claude_messages_effort_snap_and_native_verbatim(tmp_path, monkeypatch):
     monkeypatch.setattr(router_mod, "router_token", lambda: "router-test")
     cfg = config.Config(path=None, codex_home=tmp_path, listen_host="127.0.0.1", listen_port=0,
                         provider_id="ocx", openai_enabled=True, openai_include=[],
-                        default_model=None, providers=[config.ProviderCfg(
+                        providers=[config.ProviderCfg(
                             name="local-vllm", base_url="http://x/v1", anthropic_url="http://x/v1")])
     router = router_mod.Router(cfg)
     router.routes = {"local-vllm/m": Route(slug="local-vllm/m", provider="local-vllm", upstream_model="m",
@@ -138,8 +138,6 @@ def test_claude_messages_effort_snap_and_native_verbatim(tmp_path, monkeypatch):
     native_req = make_mocked_request("POST", "/v1/messages", headers={"Authorization": "Bearer claude-client-login"})
     asyncio.run(router.claude_messages(native_req, "v1/messages", json.dumps(native).encode()))
     assert seen == native  # real Anthropic gets the body verbatim
-
-
 
 
 def test_summary_envelope_roundtrip():
@@ -168,18 +166,20 @@ def test_config_errors(tmp_path):
         config.load(p)
 
 
-def test_apply_and_restore(tmp_path, monkeypatch):
+@pytest.mark.parametrize("model", [None, "old", "alibaba/qwen"])
+def test_apply_and_restore(tmp_path, monkeypatch, model):
     monkeypatch.setattr(codex_setup, "STATE_DIR", tmp_path / "state")
     home = tmp_path / "codex"
     home.mkdir()
-    (home / "config.toml").write_text('# mine\nmodel = "old"\n\n[projects."/x"]\ntrust_level = "trusted"\n')
+    path = home / "config.toml"
+    model_line = f'model = "{model}"\n' if model else ""
+    path.write_text(f'# mine\n{model_line}\n[projects."/x"]\ntrust_level = "trusted"\n')
     cfg = config.Config(path=None, codex_home=home, listen_host="127.0.0.1", listen_port=11111,
-                        provider_id="ocx", openai_enabled=True, openai_include=[],
-                        default_model=None, providers=[])
+                        provider_id="ocx", openai_enabled=True, openai_include=[], providers=[])
     d = Discovery(openai=OpenAIAuth(mode="chatgpt"), openai_models=[{"slug": "gpt-x"}], routes=[ROUTE])
-    codex_setup.apply_codex_config(cfg, d, tmp_path / "cat.json")
-    doc = tomlkit.parse((home / "config.toml").read_text())
-    assert doc["model_provider"] == "ocx" and doc["model"] == "gpt-x"
+    codex_setup.apply_codex_config(cfg, d, tmp_path / "state" / "model-catalog.json")
+    doc = tomlkit.parse(path.read_text())
+    assert doc["model_provider"] == "ocx" and doc.get("model") == model
     assert doc["model_providers"]["ocx"]["requires_openai_auth"] is True
     assert doc["projects"]["/x"]["trust_level"] == "trusted"
     assert "# mine" in (home / "config.toml").read_text()
@@ -187,11 +187,10 @@ def test_apply_and_restore(tmp_path, monkeypatch):
     text = (home / "config.toml").read_text()
     assert text.index("model_provider") < text.index("[projects")
 
-    doc["model"] = "alibaba/qwen"
-    (home / "config.toml").write_text(tomlkit.dumps(doc))
-    codex_setup.restore_codex_config(cfg, {"alibaba/qwen"})
-    doc = tomlkit.parse((home / "config.toml").read_text())
-    assert "model_provider" not in doc and "model" not in doc and "model_providers" not in doc
+    codex_setup.restore_codex_config(cfg)
+    doc = tomlkit.parse(path.read_text())
+    assert not {"model_provider", "model_providers", "model_catalog_json"}.intersection(doc)
+    assert doc.get("model") == model
 
 
 def test_claude_unmanaged_symlink_is_not_written(tmp_path, monkeypatch):
@@ -216,8 +215,10 @@ def test_claude_apply_and_restore(tmp_path, monkeypatch):
         monkeypatch.setattr(tunnel, name, tmp_path / name)
     (tmp_path / "claude").mkdir()
     (tmp_path / "_local").mkdir()
-    (tmp_path / "_local" / "real.json").write_text(json.dumps({"theme": "dark", "env": {"FOO": "1"},
-                                                    "modelPicker": {"options": [{"model": "mine"}]}}))
+    user_settings = {"theme": "dark", "model": "claude-sonnet-5-5",
+                     "env": {"FOO": "1", "ANTHROPIC_MODEL": "claude-opus-5-5"},
+                     "modelPicker": {"options": [{"model": "mine"}]}}
+    (tmp_path / "_local" / "real.json").write_text(json.dumps(user_settings))
     (tmp_path / "claude" / "settings.json").symlink_to(tmp_path / "_local" / "real.json")
     (tmp_path / "desktop" / "configLibrary").mkdir(parents=True)
     (tmp_path / "desktop" / "configLibrary" / "old.json").write_text("{}")
@@ -225,7 +226,7 @@ def test_claude_apply_and_restore(tmp_path, monkeypatch):
         {"appliedId": "old", "entries": [{"id": "old", "name": "Old"}]}))
     other = config.ProviderCfg(name="other", base_url="http://y/v1")
     cfg = config.Config(path=None, codex_home=tmp_path, listen_host="127.0.0.1", listen_port=11111,
-                        provider_id="ocx", openai_enabled=True, openai_include=[], default_model=None,
+                        provider_id="ocx", openai_enabled=True, openai_include=[],
                         providers=[config.ProviderCfg(name="alibaba", base_url="http://x/v1", anthropic_url="http://x/a"),
                                    other])
     other_route = Route(slug="other/m", provider="other", upstream_model="m", base_url="http://y/v1",
@@ -245,6 +246,8 @@ def test_claude_apply_and_restore(tmp_path, monkeypatch):
     assert path.is_symlink() and path.stat().st_mode & 0o777 == 0o600
     s = json.loads(path.read_text())
     assert s["theme"] == "dark" and s["env"]["FOO"] == "1"
+    assert s["model"] == user_settings["model"]
+    assert s["env"]["ANTHROPIC_MODEL"] == user_settings["env"]["ANTHROPIC_MODEL"]
     assert s["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:11111"
     assert s["env"]["ANTHROPIC_CUSTOM_HEADERS"] == f"x-ocx-token: {config.router_token()}"
     assert [o["model"] for o in s["modelPicker"]["options"]] == ["mine", "gpt-x", "alibaba/qwen[1m]"]
@@ -261,8 +264,7 @@ def test_claude_apply_and_restore(tmp_path, monkeypatch):
     assert prof["inferenceGatewayApiKey"] == config.router_token()
 
     claude_setup.restore_claude_config(cfg)
-    assert json.loads(path.read_text()) == {"theme": "dark", "env": {"FOO": "1"},
-                                            "modelPicker": {"options": [{"model": "mine"}]}}
+    assert json.loads(path.read_text()) == user_settings
     meta = json.loads((lib / "_meta.json").read_text())
     assert meta == {"appliedId": "old", "entries": [{"id": "old", "name": "Old"}]}
     assert not (lib / f"{claude_setup.PROFILE_ID}.json").exists()
@@ -275,6 +277,14 @@ def test_custom_catalog_entry_keeps_instructions():
     assert gpt["service_tiers"]  # fast mode kept for GPT
     assert custom["model_messages"] and "service_tiers" not in custom
     assert custom["context_window"] == 1_000_000 and custom["auto_compact_token_limit"] == 900_000
+
+
+def test_catalog_keeps_native_automatic_default_above_custom_models():
+    gpt = [{"slug": "gpt-other", "priority": 2}, {"slug": "gpt-default", "priority": 1}]
+    catalog = codex_setup.build_catalog(Discovery(OpenAIAuth("chatgpt"), gpt, [ROUTE]))
+    ordered = sorted(catalog["models"], key=lambda m: m["priority"])
+    assert [m["slug"] for m in ordered] == ["gpt-default", ROUTE.slug, "gpt-other"]
+    assert gpt[1]["priority"] == 1
 
 
 # ---------------------------------------------------------------- anthropic
