@@ -94,8 +94,14 @@ CATALOG = STATE_DIR / "model-catalog.json"
 def write_catalog(catalog: dict[str, Any]) -> Path:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     path = CATALOG
+    contents = json.dumps(catalog, indent=2)
+    try:
+        if path.read_text() == contents:
+            return path
+    except (FileNotFoundError, UnicodeError):
+        pass
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(catalog, indent=2))
+    tmp.write_text(contents)
     tmp.replace(path)
     return path
 

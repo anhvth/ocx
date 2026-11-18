@@ -87,7 +87,7 @@ installs the package. Restart Codex and Pi when needed to reload model lists.
 
 | command | what it does |
 |---|---|
-| `start` (default) | reads the YAML, checks every provider, configures Codex, Claude and Pi, and (re)starts the router in the background |
+| `start` (default), `restart` | reads the YAML, checks every provider, configures Codex, Claude and Pi, and (re)starts the router in the background |
 | `off` | stops the router, removes its Codex/Claude settings, and restores Pi's previous model registry |
 | `status` | checks the GPT model list and shows catalog gaps, exclusions, and routed models |
 | `update` | installs from GitHub, refreshes managed client config, and (re)starts the router |
@@ -96,6 +96,9 @@ installs the package. Restart Codex and Pi when needed to reload model lists.
 | `serve` | runs the router in the foreground (for debugging / systemd) |
 
 Run `start` again after any change (new model, new key, new machine). It is idempotent.
+If the running Codex CLI app-server predates the model catalog, `start` restarts it automatically;
+if the restart fails it prints `codex app-server daemon restart` to run manually.
+The Codex Desktop app may still need to be quit and reopened.
 Use `--config PATH` or `$OCX_CONFIG` to point at a different YAML.
 
 OCX configures routing and model lists; Codex, Pi, and Claude Code manage their own model defaults.

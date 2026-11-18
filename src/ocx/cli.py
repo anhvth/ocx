@@ -2,6 +2,7 @@
 
   ocx            same as `start`
   ocx start      discover models, write Codex config, (re)start the router
+  ocx restart    same as `start`
   ocx off        stop the router and put Codex back to its defaults
   ocx status     what is running and which models Codex sees
   ocx init       write an example config to ~/.config/ocx/config.yaml
@@ -14,6 +15,7 @@ import argparse
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -131,6 +133,38 @@ def _spawn_router(cfg: Config) -> int:
     raise RuntimeError("router failed to start:\n" + "\n".join(tail))
 
 
+def _restart_stale_codex(cfg: Config, catalog: Path) -> None:
+    sock = cfg.codex_home / "app-server-control" / "app-server-control.sock"
+    try:
+        socket_stat = sock.stat()
+        if not stat.S_ISSOCK(socket_stat.st_mode) or catalog.stat().st_mtime_ns <= socket_stat.st_mtime_ns:
+            return
+    except OSError:
+        return
+
+    cmd = ["codex", "app-server", "daemon"]
+    env = {**os.environ, "CODEX_HOME": str(cfg.codex_home)}
+    manual = "Run `codex app-server daemon restart` when ready."
+    try:
+        status = subprocess.run([*cmd, "version"], env=env, capture_output=True, text=True, timeout=3)
+        info = json.loads(status.stdout) if status.returncode == 0 else None
+        if not isinstance(info, dict) or info.get("status") != "running":
+            return
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        ui.warn(f"Could not check the Codex daemon. {manual}")
+        return
+
+    ui.warn("Codex's running app-server predates the model catalog; restarting it (open CLI sessions reconnect).")
+    try:
+        result = subprocess.run([*cmd, "restart"], env=env, timeout=60)
+        if result.returncode == 0:
+            ui.ok("Codex app-server restarted")
+            return
+    except (OSError, subprocess.TimeoutExpired) as e:
+        ui.warn(str(e))
+    ui.warn(f"Could not restart the Codex daemon. {manual}")
+
+
 def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     from .claude_setup import apply_claude_config
     from .codex_setup import apply_codex_config, build_catalog, write_catalog
@@ -174,8 +208,8 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     ui.head("Done")
     if d.errors:
         ui.warn(f"{d.errors} provider(s) unavailable (see ⚠ above); their models are not listed in Codex")
-    ui.info("Restart the Codex app to pick up the model list. The codex CLI attaches to a background")
-    ui.info("daemon that keeps its old list: `codex app-server daemon restart` (closes open codex sessions).")
+    _restart_stale_codex(cfg, catalog)
+    ui.info("If the Codex Desktop app still shows the old list, quit and reopen it.")
     ui.info("Claude Code (`claude`, `cl`) sees the new models in /model right away.")
     ui.info("Pi: restart to refresh the model list. In /model, Enter switches for this session; Ctrl+S saves the default.")
     ui.info("Turn it off any time with: ocx off")
@@ -291,8 +325,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", "-c", help=f"YAML config (default {DEFAULT_CONFIG})")
     ap.add_argument("--version", action="version", version=__version__)
     sub = ap.add_subparsers(dest="cmd")
-    for name, h in [("start", "discover + configure Codex + (re)start router"),
-                    ("off", "stop router and restore Codex defaults"),
+    sub.add_parser("start", aliases=["restart"], help="discover + configure Codex + (re)start router")
+    for name, h in [("off", "stop router and restore Codex defaults"),
                     ("stop", "stop the router only"), ("status", "show state"),
                     ("serve", "run the router in the foreground"),
                     ("update", "install and activate the current published version")]:
@@ -300,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("init", help="write an example config")
     p.add_argument("--force", action="store_true")
     args = ap.parse_args(argv)
-    cmd = args.cmd or "start"
+    cmd = "start" if args.cmd in (None, "restart") else args.cmd
     if cmd == "update":
         return cmd_update(args.config)
     if cmd != "serve":  # The background router is launched by the CLI.
