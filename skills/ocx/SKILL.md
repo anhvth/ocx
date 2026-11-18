@@ -45,7 +45,7 @@ See `examples/config.yaml` in the repo.
 | want | do |
 |---|---|
 | first setup / after any change | `ocx start`, then the user restarts the Codex app |
-| update the installed package | `ocx update`, then `ocx start` to load the new code |
+| update the installed package | `ocx update` (installs and restarts the router; when coming from 0.4.4 or earlier, run `ocx start` once afterward) |
 | add a model/provider | edit the YAML, `start` again |
 | add Claude models | set `$ANTHROPIC_API_KEY` (or `anthropic: {api_key_file: ...}`), `start` again; pick `anthropic/claude-*` |
 | same models in Claude Code (`claude`, `cl`) / Claude app | nothing extra: `start` writes `~/.claude/settings.json` + the app's gateway profile; add `anthropic_url:` to providers that have one |

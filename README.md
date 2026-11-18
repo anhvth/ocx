@@ -78,15 +78,17 @@ preserves legacy provider IDs for saved threads and accepts the old token header
 ## Commands
 
 Commands check GitHub for a newer package version and print a notice when one is available.
-The check has a two-second timeout. Run `ocx update` to install the latest published code
-with uv, then `ocx start` to load it into the router.
+The check has a two-second timeout. Run `ocx update` on each machine to install the latest
+published code with uv and start the router with the new code. Existing YAML is reused, not rewritten.
+If updating from OCX 0.4.4 or earlier, run `ocx start` once after `ocx update`; the old updater only
+installs the package. Restart Codex and Pi when needed to reload model lists.
 
 | command | what it does |
 |---|---|
 | `start` (default) | reads the YAML, checks every provider, configures Codex, Claude and Pi, and (re)starts the router in the background |
 | `off` | stops the router, removes its Codex/Claude settings, and restores Pi's previous model scope and defaults |
 | `status` | checks the GPT model list and shows catalog gaps, exclusions, and routed models |
-| `update` | updates the installed package from GitHub without restarting the running router |
+| `update` | installs from GitHub, refreshes managed client config, and (re)starts the router |
 | `stop` | stops only the router (Codex stays pointed at it) |
 | `init` | writes an example config (`--force` overwrites an existing one) |
 | `serve` | runs the router in the foreground (for debugging / systemd) |

@@ -5,7 +5,7 @@
   ocx off        stop the router and put Codex back to its defaults
   ocx status     what is running and which models Codex sees
   ocx init       write an example config to ~/.config/ocx/config.yaml
-  ocx update     install the current published version
+  ocx update     install and activate the current published version
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def _check_update() -> None:
         ui.warn(f"ocx {latest} is available (installed: {__version__}); run `ocx update`")
 
 
-def cmd_update() -> int:
+def cmd_update(config_path: str | None) -> int:
     latest = _latest_version()
     if latest is None:
         ui.err("could not read the published OCX version; check your connection to GitHub")
@@ -66,14 +66,18 @@ def cmd_update() -> int:
         ui.info(f"installed ocx {__version__} is newer than the published {latest}")
         return 0
     try:
-        result = subprocess.run(["uv", "tool", "install", "--force", "--refresh", UPSTREAM_PACKAGE])
+        subprocess.run(["uv", "tool", "install", "--force", "--refresh", UPSTREAM_PACKAGE], check=True)
+        bin_dir = subprocess.check_output(["uv", "tool", "dir", "--bin"], text=True).strip()
+        cmd = [str(Path(bin_dir) / "ocx")]
+        if config_path:
+            cmd += ["--config", config_path]
+        ui.ok("OCX installed; starting the updated router")
+        return subprocess.run([*cmd, "start"]).returncode
+    except subprocess.CalledProcessError as exc:
+        return exc.returncode
     except OSError as exc:
-        ui.err(f"could not run uv: {exc}")
+        ui.err(f"could not update OCX: {exc}")
         return 1
-    if result.returncode:
-        return result.returncode
-    ui.ok("OCX installed; run `ocx start` to load the update into the router")
-    return 0
 
 
 def _health(cfg: Config, timeout: float = 2) -> dict | None:
@@ -311,14 +315,14 @@ def main(argv: list[str] | None = None) -> int:
                     ("off", "stop router and restore Codex defaults"),
                     ("stop", "stop the router only"), ("status", "show state"),
                     ("serve", "run the router in the foreground"),
-                    ("update", "install the current published version")]:
+                    ("update", "install and activate the current published version")]:
         sub.add_parser(name, help=h)
     p = sub.add_parser("init", help="write an example config")
     p.add_argument("--force", action="store_true")
     args = ap.parse_args(argv)
     cmd = args.cmd or "start"
     if cmd == "update":
-        return cmd_update()
+        return cmd_update(args.config)
     if cmd != "serve":  # The background router is launched by the CLI.
         _check_update()
     if cmd == "init":
