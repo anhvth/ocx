@@ -73,6 +73,22 @@ No install? Run any command as
 Run `start` again after any change (new model, new key, new machine). It is idempotent.
 Use `--config PATH` or `$OPENCODEX_DESKTOP_CONFIG` to point at a different YAML.
 
+## Web dashboard
+
+Open `http://127.0.0.1:11111/` (or your configured listen address). Alongside account limits and
+models, **Token usage per response** shows the latest 100 upstream API responses: model, response ID,
+input tokens, cached input tokens, output tokens and status. It refreshes every 30 seconds.
+
+Cached tokens are part of total input, not extra tokens. Anthropic's input total includes cache
+reads and cache writes. Missing counters are shown as `—`, not zero. One chat turn can make several
+API calls (for example, tool calls), so it can produce several rows. Counts come from upstream usage,
+not estimates or billing calculations. Responses that end before final usage arrives can lack counts.
+Capture is bounded to 2 MiB per JSON body or SSE event; oversized data can also leave counts unavailable.
+
+Only metadata is kept in RAM; prompts, response text and credentials are not stored in this table.
+History starts when the router starts, is cleared on restart, and is not backfilled from old chats.
+The dashboard and its read-only JSON are blocked through the public Claude tunnel.
+
 ## Config (`~/.config/opencodex-desktop/config.yaml`)
 
 ```yaml

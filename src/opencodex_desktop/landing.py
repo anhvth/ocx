@@ -104,6 +104,20 @@ def _models_section(groups: list[dict]) -> str:
     return "".join(cards)
 
 
+def _message_rows(messages: list[dict]) -> str:
+    rows = []
+    for m in messages:
+        counts = "".join(f'<td class="num">{m[key]:,}</td>' if m.get(key) is not None
+                         else '<td class="num" title="Not reported by upstream">—</td>'
+                         for key in ("input_tokens", "cached_tokens", "output_tokens"))
+        stamp = time.strftime("%H:%M:%S", time.localtime(m["at"]))
+        response_id = m.get("response_id") or "—"
+        rows.append(f'<tr><td>{stamp}</td><td><code>{_esc(m["model"])}</code></td>'
+                    f'<td><code title="{_esc(response_id)}">#{m["sequence"]} · {_esc(response_id)}</code></td>'
+                    f'{counts}<td>{_esc(m["http_status"])} · {_esc(m["status"])}</td></tr>')
+    return "".join(rows) or '<tr><td class="empty" colspan="7">No responses recorded since router startup.</td></tr>'
+
+
 _CSS = """
 :root{
   color-scheme:dark;
@@ -182,6 +196,12 @@ tbody tr:hover{background:rgba(34,197,94,.05)}
 .empty{color:var(--muted);text-align:center;padding:22px}
 .pill{display:inline-grid;place-items:center;min-width:30px;height:24px;border-radius:99px;border:1px solid var(--line);color:var(--muted);background:rgba(7,11,20,.3);font-size:.78rem}
 .pill.yes{color:#BBF7D0;border-color:rgba(34,197,94,.4);background:var(--green-dim)}
+.message-usage{margin-top:26px;overflow:hidden}
+.message-usage table{min-width:940px}
+.message-usage td:first-child{width:auto;white-space:nowrap;font-family:var(--mono)}
+.message-usage td code{display:block;max-width:26ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.message-usage td.num{white-space:nowrap;font-variant-numeric:tabular-nums;text-align:right}
+.message-usage .note{padding:0 20px 16px}
 .usage,.panel{padding:20px}
 .usage-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
 h2{margin:0;font-size:1.12rem;letter-spacing:-.02em}
@@ -228,7 +248,8 @@ _JS = """
   function resetLabel(at,secs){if(!at)return'';var d=new Date(at*1000);if(secs<=18000){var h=d.getHours(),m=d.getMinutes(),ap=h>=12?'PM':'AM';h=h%12||12;return h+':' +(m<10?'0':'')+m+' '+ap;}var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return mo[d.getMonth()]+' '+d.getDate();}
   function usageInner(u){if(!u)return'<p class="note">Codex usage unavailable (not signed in or endpoint unreachable).</p>';var plan=(u.plan||'unknown');plan=plan.charAt(0).toUpperCase()+plan.slice(1);var out='<div class="usage-source">Usage source: Your '+esc(plan)+' plan</div>';(u.windows||[]).forEach(function(w){var left=w.left|0;var r=resetLabel(w.reset_at,w.seconds|0);var tone=left>40?'ok':(left>15?'warn':'low');out+='<div class="usage-row"><div class="usage-top"><span>'+esc(w.label||'Limit')+'</span><span class="pct">'+left+'% left</span></div><div class="bar '+tone+'"><span style="width:'+left+'%"></span></div>'+(r?'<div class="usage-reset">Resets '+esc(r)+'</div>':'')+'</div>';});if(u.credits)out+='<div class="usage-kv"><span>Credits</span><strong>'+esc(u.credits)+'</strong></div>';if(u.resets)out+='<div class="usage-kv"><span>Full reset</span><strong>'+(u.resets|0)+' remaining</strong></div>';return out;}
   function set(id,v){var e=document.getElementById(id);if(e&&v!=null)e.textContent=v;}
-  function apply(d){ts=Date.now();ago();if(d.groups){var n=0;d.groups.forEach(function(g){n+=(g.models||[]).length;});set('stat-models',n);set('stat-providers',d.groups.length);}if(d.usage){set('stat-plan',(d.usage.plan||'—').toUpperCase());set('stat-credits',(d.usage.credits||'—').replace(' credits',''));var ub=document.getElementById('usage-body');if(ub)ub.innerHTML=usageInner(d.usage);}var dot=document.getElementById('status-dot');if(dot&&!reduce){dot.classList.remove('pulse');void dot.offsetWidth;dot.classList.add('pulse');}}
+  function messageRows(ms){if(!ms.length)return'<tr><td class="empty" colspan="7">No responses recorded since router startup.</td></tr>';return ms.map(function(m){var id=m.response_id||'—';var out='<tr><td>'+esc(new Date(m.at*1000).toLocaleTimeString())+'</td><td><code>'+esc(m.model)+'</code></td><td><code title="'+esc(id)+'">#'+esc(m.sequence)+' · '+esc(id)+'</code></td>';['input_tokens','cached_tokens','output_tokens'].forEach(function(k){out+=m[k]==null?'<td class="num" title="Not reported by upstream">—</td>':'<td class="num">'+esc(m[k].toLocaleString())+'</td>';});return out+'<td>'+esc(m.http_status)+' · '+esc(m.status)+'</td></tr>';}).join('');}
+  function apply(d){ts=Date.now();ago();if(d.messages){var mb=document.getElementById('message-rows');if(mb)mb.innerHTML=messageRows(d.messages);}if(d.groups){var n=0;d.groups.forEach(function(g){n+=(g.models||[]).length;});set('stat-models',n);set('stat-providers',d.groups.length);}if(d.usage){set('stat-plan',(d.usage.plan||'—').toUpperCase());set('stat-credits',(d.usage.credits||'—').replace(' credits',''));var ub=document.getElementById('usage-body');if(ub)ub.innerHTML=usageInner(d.usage);}var dot=document.getElementById('status-dot');if(dot&&!reduce){dot.classList.remove('pulse');void dot.offsetWidth;dot.classList.add('pulse');}}
   function refresh(){var b=document.getElementById('refresh');if(b)b.classList.add('spinning');fetch('/api/overview',{headers:{'Accept':'application/json'}}).then(function(r){if(!r.ok)throw 0;return r.json();}).then(apply).catch(function(){}).finally(function(){if(b)setTimeout(function(){b.classList.remove('spinning');},400);});}
   var rb=document.getElementById('refresh');if(rb)rb.addEventListener('click',refresh);
   setInterval(refresh,30000);
@@ -236,7 +257,8 @@ _JS = """
 """
 
 
-def render_landing(version: str, base_url: str, groups: list[dict], usage: dict | None = None) -> str:
+def render_landing(version: str, base_url: str, groups: list[dict], usage: dict | None = None,
+                   messages: list[dict] | None = None) -> str:
     total = sum(len(g.get("models", [])) for g in groups)
     plan = (usage or {}).get("plan") or "—"
     credits = ((usage or {}).get("credits") or "—").replace(" credits", "")
@@ -272,6 +294,17 @@ def render_landing(version: str, base_url: str, groups: list[dict], usage: dict 
       <div class="stat" role="listitem"><div class="k">Plan</div><div class="v" id="stat-plan">{_esc(plan.upper())}</div></div>
       <div class="stat" role="listitem"><div class="k">Credits</div><div class="v" id="stat-credits">{_esc(credits)}</div></div>
     </div>
+  </section>
+  <section class="card message-usage reveal" aria-labelledby="messages-title">
+    <header class="provider-head"><h2 id="messages-title">Token usage per response</h2><span class="badge">Latest 100</span></header>
+    <div class="table-scroll" tabindex="0" role="region" aria-label="Per-response token usage, scroll horizontally">
+      <table><caption>Token counts reported by upstream for each model response, newest first</caption>
+        <thead><tr><th scope="col">Time</th><th scope="col">Model</th><th scope="col">Response</th>
+          <th scope="col">Input (total)</th><th scope="col">Cached input</th><th scope="col">Output</th><th scope="col">Status</th></tr></thead>
+        <tbody id="message-rows">{_message_rows(messages or [])}</tbody>
+      </table>
+    </div>
+    <p class="note">Cached input is included in total input. — means not reported, not zero. Each row is one API response; a chat turn may use several. Kept in memory since startup; no message content stored. Auto-refreshes every 30s.</p>
   </section>
   <div class="layout">
     <div class="col" aria-label="Models">{models_html}</div>

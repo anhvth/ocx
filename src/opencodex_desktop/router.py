@@ -21,6 +21,7 @@ import json
 import os
 import time
 import uuid
+from collections import deque
 from typing import Any
 
 import aiohttp
@@ -33,6 +34,7 @@ from .config import ANTHROPIC_BASE, Config, router_token
 from .messages_adapter import Translator, fold_system_messages, to_responses
 from .landing import render_landing
 from .usage import fetch_codex_usage
+from .token_usage import TokenUsage
 from .discovery import _is_loopback, load_routes, provider_headers, read_openai_auth
 from .transforms import (compact_v1_output, compaction_body, encode_summary, is_compaction_request,
                          response_text, sanitize_request, user_texts)
@@ -70,6 +72,8 @@ class Router:
         self.routes = {r.slug: r for r in load_routes()}
         self.providers = {p.name: p for p in cfg.providers}
         self.token = router_token()
+        self.message_usage: deque[dict[str, Any]] = deque(maxlen=100)
+        self.message_count = 0
         self.direct: aiohttp.ClientSession | None = None
         self.proxied: aiohttp.ClientSession | None = None
 
@@ -176,7 +180,7 @@ class Router:
         if "cf-connecting-ip" in req.headers:
             return web.Response(status=403)
         usage = await asyncio.to_thread(fetch_codex_usage, read_openai_auth(self.cfg.codex_home))
-        html_page = render_landing(__version__, self.cfg.base_url, self._groups(), usage)
+        html_page = render_landing(__version__, self.cfg.base_url, self._groups(), usage, list(self.message_usage))
         return web.Response(text=html_page, content_type="text/html", charset="utf-8")
 
     async def overview_api(self, req: web.Request) -> web.Response:
@@ -185,7 +189,12 @@ class Router:
             return web.Response(status=403)
         usage = await asyncio.to_thread(fetch_codex_usage, read_openai_auth(self.cfg.codex_home))
         return web.json_response({"version": __version__, "base_url": self.cfg.base_url,
-                                  "groups": self._groups(), "usage": usage, "ts": time.time()})
+                                  "groups": self._groups(), "usage": usage,
+                                  "messages": list(self.message_usage), "ts": time.time()})
+
+    def record_usage(self, capture: TokenUsage, status: int) -> None:
+        self.message_count += 1
+        self.message_usage.appendleft({"sequence": self.message_count, **capture.result(status)})
 
     def authorized(self, req: web.Request, claude: bool) -> bool:
         h = req.headers
@@ -338,7 +347,7 @@ class Router:
             with open(os.path.join(os.environ["OPENCODEX_DESKTOP_DUMP_DIR"], f"{time.time():.3f}.json"), "w") as f:
                 json.dump(body, f)
         return await self.stream(req, "POST", f"{provider.anthropic_url}/messages", headers,
-                                 json.dumps(body).encode(), label=f"{route.slug} (claude)")
+                                 json.dumps(body).encode(), label=f"{route.slug} (claude)", model=route.slug)
 
     async def claude_gpt(self, req: web.Request, body: dict[str, Any], model: str) -> web.StreamResponse:
         auth = read_openai_auth(self.cfg.codex_home)
@@ -354,8 +363,11 @@ class Router:
         tr = Translator(model)
         streaming = bool(body.get("stream"))
         resp: web.StreamResponse | None = None
+        capture = TokenUsage(model, streaming=True)
+        status = 502
         try:
             async with self.session(url).post(url, headers=headers, json=payload) as up:
+                status = up.status
                 if up.status >= 400:
                     text = (await up.text())[:1000]
                     _log(f"{model} (claude) -> {up.status} {text[:300]}")
@@ -367,14 +379,16 @@ class Router:
                     await resp.write(tr.start())
                 buf = b""
                 async for chunk in up.content.iter_any():
-                    buf += chunk
+                    buf = (buf + chunk).replace(b"\r\n", b"\n")
                     while b"\n\n" in buf:
                         frame, buf = buf.split(b"\n\n", 1)
                         data = b"".join(line[5:].strip() for line in frame.split(b"\n") if line.startswith(b"data:"))
                         if not data or data == b"[DONE]":
                             continue
                         try:
-                            out = tr.feed(json.loads(data))
+                            event = json.loads(data)
+                            capture.event(event)
+                            out = tr.feed(event)
                         except ValueError:
                             continue
                         if out and resp is not None:
@@ -385,6 +399,8 @@ class Router:
                 return resp
             _log(f"{model} (claude) -> unreachable: {e!r}")
             return _aerror(502, f"opencodex-desktop: cannot reach ChatGPT: {e}")
+        finally:
+            self.record_usage(capture, status)
         _log(f"{model} (claude) -> {'200' if not tr.error else '502 ' + tr.error} ({time.monotonic() - start:.1f}s)")
         if resp is not None:
             await resp.write(tr.finish())
@@ -448,16 +464,30 @@ class Router:
         return await self.stream(req, req.method, url, headers, raw, label=label)
 
     async def stream(self, req: web.Request, method: str, url: str, headers: dict[str, str],
-                     data: bytes, label: str) -> web.StreamResponse:
+                     data: bytes, label: str, model: str | None = None) -> web.StreamResponse:
         start = time.monotonic()
         resp: web.StreamResponse | None = None
+        capture = None
+        if method == "POST" and req.path in ("/v1/responses", "/v1/responses/compact", "/v1/messages"):
+            try:
+                body = json.loads(data)
+            except ValueError:
+                body = None
+            if isinstance(body, dict) and isinstance(body.get("model"), str):
+                capture = TokenUsage(model or body["model"])
+        status = 502
         try:
             async with self.session(url).request(method, url, headers=headers, data=data) as up:
+                status = up.status
+                if capture:
+                    capture.streaming = up.content_type == "text/event-stream"
                 resp = web.StreamResponse(status=up.status, headers={
                     k: v for k, v in up.headers.items() if k.lower() not in HOP})
                 await resp.prepare(req)
                 head = b""
                 async for chunk in up.content.iter_any():
+                    if capture:
+                        capture.feed(chunk)
                     if up.status >= 400 and len(head) < 2000:
                         head += chunk
                     await resp.write(chunk)
@@ -472,6 +502,9 @@ class Router:
                 return resp
             _log(f"{label} -> unreachable: {e!r}")
             return _error(502, f"opencodex-desktop: cannot reach {url.split('?')[0]}: {e}", "upstream_unreachable")
+        finally:
+            if capture:
+                self.record_usage(capture, status)
 
     # ---------------------------------------------------------------- routed providers
     async def routed(self, req: web.Request, tail: str, body: dict[str, Any]) -> web.StreamResponse:
@@ -502,7 +535,7 @@ class Router:
                 return _error(e.status, e.message)
             return await self.replay(req, body, route, items, usage)
         data = json.dumps(b).encode()
-        return await self.stream(req, "POST", f"{route.base_url}/responses", headers, data, label=route.slug)
+        return await self.stream(req, "POST", f"{route.base_url}/responses", headers, data, label=route.slug, model=route.slug)
 
     async def replay(self, req: web.Request, body: dict[str, Any], route: Any,
                      items: list[dict[str, Any]], usage: dict[str, Any] | None) -> web.StreamResponse:
@@ -518,24 +551,32 @@ class Router:
         _log(f"{route.slug} -> 200 (replayed {len(items)} items)")
         return resp
 
-    async def post_json(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
+    async def post_json(self, url: str, headers: dict[str, str], payload: dict[str, Any],
+                        model: str) -> dict[str, Any]:
+        capture = TokenUsage(model)
+        status = 502
         try:
             async with self.session(url).post(url, headers=headers, json=payload) as up:
+                status = up.status
                 text = await up.text()
                 if up.status >= 400:
                     raise UpstreamError(up.status, text[:1000])
-                return json.loads(text)
+                result = json.loads(text)
+                capture.event(result)
+                return result
         except (aiohttp.ClientError, TimeoutError) as e:
             raise UpstreamError(502, f"cannot reach {url}: {e}") from e
+        finally:
+            self.record_usage(capture, status)
 
     async def chat_call(self, b: dict[str, Any], route: Any, headers: dict[str, str]):
         chat, custom = to_chat(b)
-        resp = await self.post_json(f"{route.base_url}/chat/completions", headers, chat)
+        resp = await self.post_json(f"{route.base_url}/chat/completions", headers, chat, route.slug)
         return from_chat(resp, custom)
 
     async def anthropic_call(self, b: dict[str, Any], route: Any, headers: dict[str, str]):
         payload, custom = to_messages(b, route)
-        resp = await self.post_json(f"{route.base_url}/messages", headers, payload)
+        resp = await self.post_json(f"{route.base_url}/messages", headers, payload, route.slug)
         return from_messages(resp, custom)
 
     async def summarize(self, body: dict[str, Any], route: Any, headers: dict[str, str]) -> str:
@@ -544,7 +585,7 @@ class Router:
             items, _ = await (self.anthropic_call(cb, route, headers) if route.wire == "anthropic"
                               else self.chat_call(cb, route, headers))
             return "\n".join(c.get("text", "") for i in items if i["type"] == "message" for c in i["content"])
-        return response_text(await self.post_json(f"{route.base_url}/responses", headers, cb))
+        return response_text(await self.post_json(f"{route.base_url}/responses", headers, cb, route.slug))
 
 
 HEALTH_INTERVAL = int(os.environ.get("OPENCODEX_DESKTOP_HEALTH_INTERVAL", "60"))
