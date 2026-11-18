@@ -77,9 +77,11 @@ preserves legacy provider IDs for saved threads and accepts the old token header
 
 ## Commands
 
-Commands check GitHub for a newer package version and print a notice when one is available.
-The check has a two-second timeout. Run `ocx update` on each machine to install the latest
-published code with uv and start the router with the new code. Existing YAML is reused, not rewritten.
+OCX checks GitHub for newer versions when you run commands like `status` and, while the router
+is running, shortly after startup and once a day. Updates appear on the local dashboard and in
+`router.log`. Checks have a two-second timeout and never install anything automatically.
+Run `ocx update` on each machine to install the latest published code with uv and start the router
+with the new code. Existing YAML is reused, not rewritten.
 If updating from OCX 0.4.4 or earlier, run `ocx start` once after `ocx update`; the old updater only
 installs the package. Restart Codex and Pi when needed to reload model lists.
 
@@ -96,6 +98,10 @@ installs the package. Restart Codex and Pi when needed to reload model lists.
 Run `start` again after any change (new model, new key, new machine). It is idempotent.
 Use `--config PATH` or `$OCX_CONFIG` to point at a different YAML.
 
+OCX configures routing and model lists; Codex, Pi, and Claude Code manage their own model defaults.
+The old YAML `default_model` setting is ignored. If you turn OCX off while a routed model is
+selected, pick a model the client can use without OCX.
+
 ## Web dashboard
 
 Open `http://127.0.0.1:11111/` (or your configured listen address). Alongside account limits and
@@ -105,7 +111,8 @@ input tokens, cached input tokens, output tokens and status. It refreshes every 
 Cached tokens are part of total input, not extra tokens. Anthropic's input total includes cache
 reads and cache writes. Missing counters are shown as `—`, not zero. One chat turn can make several
 API calls (for example, tool calls), so it can produce several rows. Counts come from upstream usage,
-not estimates or billing calculations. Responses that end before final usage arrives can lack counts.
+not estimates or billing calculations. ChatGPT streams labeled `application/octet-stream` are parsed
+as SSE when streaming was requested. Responses that end before final usage arrives can lack counts.
 Capture is bounded to 2 MiB per JSON body or SSE event; oversized data can also leave counts unavailable.
 
 Only metadata is kept in RAM; prompts, response text and credentials are not stored in this table.

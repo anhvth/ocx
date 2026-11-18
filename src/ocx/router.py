@@ -496,13 +496,15 @@ class Router:
             except ValueError:
                 body = None
             if isinstance(body, dict) and isinstance(body.get("model"), str):
-                capture = TokenUsage(model or body["model"])
+                capture = TokenUsage(model or body["model"], streaming=bool(body.get("stream")))
         status = 502
         try:
             async with self.session(url).request(method, url, headers=headers, data=data) as up:
                 status = up.status
                 if capture:
-                    capture.streaming = up.content_type == "text/event-stream"
+                    # ChatGPT can label SSE as application/octet-stream.
+                    capture.streaming = up.content_type == "text/event-stream" or (
+                        up.status < 400 and up.content_type == "application/octet-stream" and capture.streaming)
                 resp = web.StreamResponse(status=up.status, headers={
                     k: v for k, v in up.headers.items() if k.lower() not in HOP})
                 await resp.prepare(req)

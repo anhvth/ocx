@@ -117,8 +117,11 @@ def test_history_is_bounded_and_ui_escapes_metadata(tmp_path, monkeypatch):
     ("chat", True, "codex"), ("anthropic", False, "codex"),
     ("anthropic", True, "claude"), ("anthropic", False, "claude-native"),
     ("responses", True, "claude-gpt"), ("responses", False, "claude-gpt"),
+    ("responses", True, "openai"), ("responses", False, "openai"),
 ])
-def test_router_records_usage_once_and_preserves_wire_bytes(tmp_path, monkeypatch, wire, streaming, client):
+@pytest.mark.parametrize("stream_content_type", ["text/event-stream", "application/octet-stream"])
+def test_router_records_usage_once_and_preserves_wire_bytes(
+        tmp_path, monkeypatch, wire, streaming, client, stream_content_type):
     monkeypatch.setattr(router, "router_token", lambda: "test-token")
     monkeypatch.setattr(router, "fetch_codex_usage", lambda _: None)
     monkeypatch.setattr(codex_setup, "CATALOG", tmp_path / "absent-catalog")
@@ -143,8 +146,8 @@ def test_router_records_usage_once_and_preserves_wire_bytes(tmp_path, monkeypatc
                     {"type": "message_delta", "usage": {"output_tokens": 15}}, {"type": "message_stop"},
                 ]
             # GPT translation always asks Responses upstream for a stream.
-            if (streaming and client != "codex") or (streaming and wire == "responses") or client == "claude-gpt":
-                response = web.StreamResponse(headers={"content-type": "text/event-stream"})
+            if (streaming and client != "codex") or (streaming and wire == "responses") or client in ("claude-gpt", "openai"):
+                response = web.StreamResponse(headers={"content-type": stream_content_type})
                 await response.prepare(req)
                 data = b"".join(b"data: " + json.dumps(e).encode() + b"\r\n\r\n" for e in events)
                 for i in range(0, len(data), 7):
@@ -163,7 +166,8 @@ def test_router_records_usage_once_and_preserves_wire_bytes(tmp_path, monkeypatc
         route = Route(slug="vendor/test", provider="vendor", upstream_model="test", base_url=base,
                       wire=wire, context_window=100000, context_source="test")
         monkeypatch.setattr(router, "load_routes", lambda: [route])
-        monkeypatch.setattr(router, "read_openai_auth", lambda _: OpenAIAuth(mode="apikey", api_key="test-key", upstream=base))
+        monkeypatch.setattr(router, "read_openai_auth", lambda _: OpenAIAuth(mode="chatgpt" if client == "openai" else "apikey",
+                                                                         api_key="test-key", upstream=base))
         cfg = SimpleNamespace(codex_home=tmp_path, providers=[config.ProviderCfg(
             name="vendor", base_url=base, api_key="test-key", anthropic_url=base)], base_url="http://local/v1")
         monkeypatch.setattr(router, "HEALTH_INTERVAL", 0)
@@ -174,8 +178,8 @@ def test_router_records_usage_once_and_preserves_wire_bytes(tmp_path, monkeypatc
         site = web.TCPSite(runner, "127.0.0.1", 0)
         await site.start()
         url = f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}"
-        if client == "codex":
-            body = {"model": route.slug, "stream": streaming, "input": [{"role": "user", "content": "private prompt"}]}
+        if client in ("codex", "openai"):
+            body = {"model": "gpt-test" if client == "openai" else route.slug, "stream": streaming, "input": [{"role": "user", "content": "private prompt"}]}
             path = "/v1/responses"
             headers = {"x-opencodex-token": "test-token"}
         else:
@@ -204,9 +208,12 @@ def test_router_records_usage_once_and_preserves_wire_bytes(tmp_path, monkeypatc
                 async with session.get(url + "/") as response:
                     page = await response.text()
                     assert "Token usage per response" in page and row["response_id"] in page
-                if wire == "responses" and client == "codex":
+                    assert body["model"] in page
+                    for count in (120, 100, 15):
+                        assert f'<td class="num">{count}</td>' in page
+                if wire == "responses" and client in ("codex", "openai"):
                     expected = {"id": "resp_1", "usage": usage, "output": []}
-                    if streaming:
+                    if streaming or client == "openai":
                         assert result == b"data: " + json.dumps({"type": "response.completed", "response": expected}).encode() + b"\r\n\r\n"
                     else:
                         assert json.loads(result) == expected
