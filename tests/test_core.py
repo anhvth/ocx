@@ -35,6 +35,50 @@ def test_orphan_outputs_become_user_messages():
     assert b["reasoning"] == {"effort": "medium"} and b["store"] is False  # unsupported xhigh -> default_effort
 
 
+@pytest.mark.parametrize("tail", ["v1/responses", "v1/responses/compact"])
+@pytest.mark.parametrize("gateway", [False, True])
+def test_openai_drops_foreign_reasoning(tmp_path, monkeypatch, tail, gateway):
+    from aiohttp.test_utils import make_mocked_request
+    from opencodex_desktop import router as router_mod
+
+    monkeypatch.setattr(router_mod, "load_routes", lambda: [])
+    monkeypatch.setattr(router_mod, "router_token", lambda: "router-test")
+    monkeypatch.setattr(router_mod, "read_openai_auth", lambda _: OpenAIAuth(
+        mode="chatgpt", access_token="openai-test", upstream="http://upstream/v1"))
+    cfg = config.Config(path=None, codex_home=tmp_path, listen_host="127.0.0.1", listen_port=0,
+                        provider_id="opencodex-desktop", openai_enabled=True, openai_include=[],
+                        default_model=None, providers=[])
+    router = router_mod.Router(cfg)
+    native = {"type": "reasoning", "id": "rs_native", "encrypted_content": "opaque", "summary": []}
+    idless = {"type": "reasoning", "encrypted_content": "opaque", "summary": []}
+    history = [
+        {"type": "message", "id": "msg_user", "role": "user", "content": "hi"},
+        {"type": "reasoning", "id": "msg_cdcf7fc1-9f45-4344-bd84-48b942576e01", "summary": []},
+        native, idless,
+        {"type": "function_call", "id": "fc_1", "call_id": "c1", "name": "shell", "arguments": "{}"},
+        {"type": "function_call_output", "call_id": "c1", "output": "ok"},
+    ]
+    body = {"model": "gpt-6.1-terra", "input": history, "service_tier": "priority"}
+    req = make_mocked_request("POST", f"/{tail}", headers={
+        "Authorization": f"Bearer {'router-test' if gateway else 'openai-test'}"})
+    seen = {}
+
+    async def stream(req, method, url, headers, data, label):
+        seen.update(json.loads(data))
+        return router_mod.web.json_response({"ok": True})
+
+    monkeypatch.setattr(router, "stream", stream)
+    resp = asyncio.run(router.forward_openai(req, tail, json.dumps(body).encode()))
+    assert resp.status == 200
+    assert seen["input"] == [history[0], native, idless, *history[4:]]
+    assert seen["service_tier"] == "priority" and seen["model"] == "gpt-6.1-terra"
+    # Pure GPT history must retain native reasoning, IDs and all request options.
+    body["input"] = [history[0], native, idless]
+    if not gateway:
+        asyncio.run(router.forward_openai(req, tail, json.dumps(body).encode()))
+        assert seen == body
+
+
 def test_local_deepseek_v41_efforts(monkeypatch):
     from opencodex_desktop import discovery
 

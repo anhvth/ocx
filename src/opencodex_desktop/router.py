@@ -400,6 +400,19 @@ class Router:
         if auth.mode == "none" or not auth.upstream:
             return _error(401, "opencodex-desktop: not logged in to Codex; run `codex login` (or sign in in the Codex app)")
         sub = tail[3:] if tail.startswith("v1/") else tail
+        if req.method == "POST" and sub in ("responses", "responses/compact") and raw:
+            try:
+                body = json.loads(raw)
+            except ValueError:
+                body = None
+            if isinstance(body, dict) and isinstance(body.get("input"), list):
+                # Foreign reasoning IDs survive model switches; OpenAI requires rs_ IDs.
+                items = [item for item in body["input"] if not (
+                    isinstance(item, dict) and item.get("type") == "reasoning"
+                    and "id" in item and not str(item["id"]).startswith("rs_"))]
+                if len(items) != len(body["input"]):
+                    body["input"] = items
+                    raw = json.dumps(body).encode()
         url = f"{auth.upstream}/{sub}" + (f"?{req.query_string}" if req.query_string else "")
         headers = {k: v for k, v in req.headers.items() if k.lower() not in HOP}
         # Gateway clients present the local token, not an OpenAI credential.

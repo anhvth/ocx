@@ -134,7 +134,8 @@ Codex sends OpenAI-only data that other providers reject. For routed models the 
 - handles Codex context compaction (both `/responses/compact` and in-stream `compaction_trigger`)
   by asking the same model for a summary.
 
-GPT requests pass through untouched (fast mode / `service_tier` included).
+GPT requests preserve fast mode / `service_tier` and native reasoning. Foreign reasoning items with
+incompatible IDs are dropped before forwarding, so switching a third-party thread to GPT works.
 
 For Claude, the router translates Responses ↔ Anthropic Messages: tool calls (including Codex's
 freeform `apply_patch`), images, and system/developer messages; reasoning effort becomes an
