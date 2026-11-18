@@ -14,7 +14,7 @@ def model_config(tmp_path):
 
 
 @pytest.mark.parametrize("failure", [None, 401, 503, "offline", "malformed"])
-def test_live_gpt_catalog_replaces_stale_cache(tmp_path, monkeypatch, failure):
+def test_live_gpt_catalog_replaces_stale_cache(tmp_path, monkeypatch, capsys, failure):
     cfg = model_config(tmp_path)
     cached = {"models": [{"slug": "gpt-old"}]}
     cache = tmp_path / "models_cache.json"
@@ -38,7 +38,8 @@ def test_live_gpt_catalog_replaces_stale_cache(tmp_path, monkeypatch, failure):
     assert json.loads(cache.read_text()) == cached  # Never overwrite Codex's own cache.
     cfg.openai_include = ["gpt-old"]
     if not failure:
-        assert discovery._openai_models(cfg, auth) == []
+        assert discovery._openai_models(cfg, auth, report_exclusions=True) == []
+        assert "GPT excluded by openai.include: gpt-6.2-sol" in capsys.readouterr().out
 
 
 def test_exclude_regex_filters_discovered_models_before_probing(tmp_path, monkeypatch):

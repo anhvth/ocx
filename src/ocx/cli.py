@@ -152,6 +152,10 @@ def _restart_stale_codex(cfg: Config, catalog: Path) -> None:
         info = json.loads(status.stdout) if status.returncode == 0 else None
         if not isinstance(info, dict) or info.get("status") != "running":
             return
+        if "managedCodexVersion" in info and info["managedCodexVersion"] is None:
+            ui.warn("The running app-server was launched outside the Codex daemon. "
+                    "Reconnect the Codex SSH session or relaunch the client that owns it to reload the catalog.")
+            return
     except (OSError, ValueError, subprocess.TimeoutExpired):
         ui.warn(f"Could not check the Codex daemon. {manual}")
         return

@@ -116,7 +116,7 @@ def read_openai_auth(codex_home: Path) -> OpenAIAuth:
     return OpenAIAuth(mode="none")
 
 
-def _openai_models(cfg: Config, auth: OpenAIAuth) -> list[dict[str, Any]]:
+def _openai_models(cfg: Config, auth: OpenAIAuth, *, report_exclusions: bool = False) -> list[dict[str, Any]]:
     cache = cfg.codex_home / "models_cache.json"
     models: list[dict[str, Any]] = []
     try:
@@ -134,6 +134,9 @@ def _openai_models(cfg: Config, auth: OpenAIAuth) -> list[dict[str, Any]]:
     # Real OpenAI slugs never contain "/"; such entries were cached from another gateway's catalog.
     models = [m for m in models if m.get("visibility", "list") == "list" and m.get("slug") and "/" not in m["slug"]]
     if cfg.openai_include:
+        if report_exclusions and (excluded := sorted({m["slug"] for m in models} - set(cfg.openai_include))):
+            ui.info("GPT excluded by openai.include: " + ", ".join(excluded))
+            ui.info(f"Edit openai.include in {cfg.path} to list them, then run `ocx restart`.")
         models = [m for m in models if m["slug"] in cfg.openai_include]
     if pattern := cfg.openai_exclude_regex:
         models = [m for m in models if not pattern.search(m["slug"])]
@@ -282,14 +285,14 @@ def discover(cfg: Config) -> Discovery:
     elif auth.mode == "none":
         ui.warn("not logged in to Codex (no auth.json): GPT models skipped. Run `codex login` or sign in in the Codex app.")
     else:
-        openai_models = _openai_models(cfg, auth)
+        openai_models = _openai_models(cfg, auth, report_exclusions=True)
         who = auth.email or auth.account_id or "API key"
         if auth.mode == "chatgpt" and auth.expires_at and auth.expires_at < time.time():
             ui.info("access token expired; Codex refreshes it on the next request")
         if openai_models:
             ui.ok(f"ChatGPT ({auth.mode}, {who}): {len(openai_models)} models: " + ", ".join(m["slug"] for m in openai_models))
         else:
-            ui.warn("logged in, but no model list cached yet; open the Codex app or run `codex` once, then re-run start")
+            ui.warn("no GPT models available after discovery and configured filters; run `ocx status` for details")
 
     routes: list[Route] = []
     for p in cfg.providers:
