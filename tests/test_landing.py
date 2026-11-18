@@ -7,6 +7,7 @@ import aiohttp
 from aiohttp import web
 
 from ocx import codex_setup, router, usage
+from ocx.config import ProviderCfg
 from ocx.discovery import Route
 from ocx.landing import USAGE_URL, render_landing
 
@@ -164,3 +165,35 @@ def test_overview_api_is_public_json_without_secrets(tmp_path, monkeypatch):
         finally:
             await runner.cleanup()
     asyncio.run(run())
+
+
+def test_dashboard_shows_loopback_provider_endpoint(tmp_path, monkeypatch):
+    """A loopback provider (e.g. an SSH-forwarded vLLM) shows its endpoint on the dashboard,
+    so it is visible that the model is reached through a local forward, not served on this Mac."""
+    catalog = tmp_path / "catalog.json"; catalog.write_text('{"models": []}')
+    monkeypatch.setattr(codex_setup, "CATALOG", catalog)
+    monkeypatch.setattr(router, "router_token", lambda: "test-token")
+    route = Route(slug="local-vllm/test-model", provider="local-vllm", upstream_model="test-model",
+                  base_url="http://127.0.0.1:7788/v1", wire="responses",
+                  context_window=100000, context_source="test")
+    monkeypatch.setattr(router, "load_routes", lambda: [route])
+    cfg = SimpleNamespace(codex_home=tmp_path, openai_enabled=False, listen_host="127.0.0.1", listen_port=0,
+                          base_url="http://127.0.0.1:19999/v1",
+                          providers=[ProviderCfg(name="local-vllm", base_url="http://127.0.0.1:7788/v1")])
+    r = router.Router(cfg)
+    groups = r._groups()
+    group = next(g for g in groups if g["provider"] == "local-vllm")
+    # API: loopback providers expose their endpoint; remote URLs stay private.
+    assert group.get("endpoint") == "http://127.0.0.1:7788/v1"
+    assert "forward" in group.get("note", "").lower()
+    remote = ProviderCfg(name="remote", base_url="https://secret-host.example/v1")
+    r.providers["remote"] = remote
+    r.routes["remote/m"] = Route(slug="remote/m", provider="remote", upstream_model="m",
+                                 base_url=remote.base_url, wire="responses",
+                                 context_window=100000, context_source="test")
+    remote_group = next(g for g in r._groups() if g["provider"] == "remote")
+    assert not remote_group.get("endpoint") and "secret-host" not in json.dumps(r._groups())
+    # Rendered page: endpoint visible in the provider card.
+    page = render_landing("1.0", "http://x/v1", groups)
+    assert "127.0.0.1:7788" in page
+    assert "forward" in page.lower()

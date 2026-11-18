@@ -189,8 +189,13 @@ class Router:
                 "reasoning": any(effort not in ("none", "off") for effort in route.efforts),
             })
         groups = ([] if not openai else [{"provider": "OpenAI / ChatGPT", "models": openai}])
-        groups.extend({"provider": provider, "models": sorted(models, key=lambda model: model["slug"])}
-                      for provider, models in sorted(providers.items()))
+        for provider, models in sorted(providers.items()):
+            group = {"provider": provider, "models": sorted(models, key=lambda model: model["slug"])}
+            config = self.providers.get(provider)
+            if config and _is_loopback(config.base_url):
+                group["endpoint"] = config.base_url
+                group["note"] = "local endpoint — usually an SSH/tunnel forward to a remote server"
+            groups.append(group)
         return groups
 
     async def landing(self, req: web.Request) -> web.Response:

@@ -94,9 +94,14 @@ def _models_section(groups: list[dict]) -> str:
                 "</tr>")
         if not rows:
             rows.append('<tr><td class="empty" colspan="4">No models available.</td></tr>')
+        details = ""
+        if g.get("endpoint") or g.get("note"):
+            details = (f'<div class="provider-note"><code>{_esc(g.get("endpoint", ""))}</code>'
+                       f' {_esc(g.get("note", ""))}</div>')
         cards.append(
             '<section class="card provider reveal"><header class="provider-head">'
             f'<h3>{provider}</h3><span class="badge">{len(models)}</span></header>'
+            f'{details}'
             '<div class="table-scroll"><table><caption>Models served by ' + provider + '</caption>'
             '<thead><tr><th scope="col">Model</th><th scope="col">Context</th>'
             '<th scope="col">Images</th><th scope="col">Reasoning</th></tr></thead>'
@@ -116,6 +121,35 @@ def _message_rows(messages: list[dict]) -> str:
                     f'<td><code title="{_esc(response_id)}">#{m["sequence"]} · {_esc(response_id)}</code></td>'
                     f'{counts}<td>{_esc(m["http_status"])} · {_esc(m["status"])}</td></tr>')
     return "".join(rows) or '<tr><td class="empty" colspan="7">No responses recorded since router startup.</td></tr>'
+
+
+def _token_chart(messages: list[dict]) -> str:
+    totals = [0, 0, 0]
+    included = 0
+    for m in messages:
+        inp, cached, output = (m.get(k) for k in ("input_tokens", "cached_tokens", "output_tokens"))
+        if inp is None or cached is None or output is None or cached > inp:
+            continue
+        included += 1
+        totals = [a + b for a, b in zip(totals, (inp - cached, cached, output))]
+    total = sum(totals)
+    if not total:
+        return '<p class="note">No complete token usage reported yet.</p>'
+    labels = ("Uncached input", "Cached input", "Output")
+    colors = ("blue", "green", "amber")
+    stops, legend = [], []
+    start = 0.0
+    for label, color, count in zip(labels, colors, totals):
+        end = start + count / total * 100
+        stops.append(f'var(--{color}) {start:.6f}% {end:.6f}%')
+        legend.append(f'<li><span class="token-key" style="background:var(--{color})" aria-hidden="true"></span>'
+                      f'{label}: <strong>{count:,}</strong> ({count / total:.1%})</li>')
+        start = end
+    return ('<div class="token-breakdown"><div class="token-pie" aria-hidden="true" '
+            f'style="background:conic-gradient({", ".join(stops)})"></div>'
+            f'<ul class="token-legend">{"".join(legend)}</ul></div>'
+            f'<p class="note">{total:,} tokens · {included} of {len(messages)} recent responses. '
+            'Only responses reporting all three counts are included; cached input is not counted twice.</p>')
 
 
 _CSS = """
@@ -182,6 +216,7 @@ h1 .grad{background:linear-gradient(90deg,var(--green),var(--cyan) 55%,var(--blu
 .reveal{animation:up .5s ease both}
 @keyframes up{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 .provider-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 20px;background:rgba(22,35,58,.6);border-bottom:1px solid var(--line)}
+.provider-note{padding:12px 20px;color:var(--muted);font-size:.76rem;overflow-wrap:anywhere}
 h3{margin:0;font-size:.98rem;letter-spacing:-.01em}
 .badge{font:600 .74rem var(--mono);color:var(--cyan);background:var(--blue-dim);border:1px solid rgba(59,130,246,.35);border-radius:99px;padding:2px 9px}
 .table-scroll{overflow-x:auto;scrollbar-width:thin;scrollbar-color:var(--line) var(--surface)}
@@ -203,6 +238,13 @@ tbody tr:hover{background:rgba(34,197,94,.05)}
 .message-usage td code{display:block;max-width:26ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .message-usage td.num{white-space:nowrap;font-variant-numeric:tabular-nums;text-align:right}
 .message-usage .note{padding:0 20px 16px}
+.token-summary{padding:20px;border-bottom:1px solid var(--line)}
+.token-summary h3{margin-bottom:16px}
+.token-breakdown{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.token-pie{width:144px;height:144px;border-radius:50%;flex:none}
+.token-legend{list-style:none;margin:0;padding:0;display:grid;gap:12px;font-size:.9rem}
+.token-key{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:8px}
+.message-usage .token-summary .note{padding:0}
 .usage,.panel{padding:20px}
 .usage-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
 h2{margin:0;font-size:1.12rem;letter-spacing:-.02em}
@@ -250,11 +292,20 @@ _JS = """
   function usageInner(u){if(!u)return'<p class="note">Codex usage unavailable (not signed in or endpoint unreachable).</p>';var plan=(u.plan||'unknown');plan=plan.charAt(0).toUpperCase()+plan.slice(1);var out='<div class="usage-source">Usage source: Your '+esc(plan)+' plan</div>';(u.windows||[]).forEach(function(w){var left=w.left|0;var r=resetLabel(w.reset_at,w.seconds|0);var tone=left>40?'ok':(left>15?'warn':'low');out+='<div class="usage-row"><div class="usage-top"><span>'+esc(w.label||'Limit')+'</span><span class="pct">'+left+'% left</span></div><div class="bar '+tone+'"><span style="width:'+left+'%"></span></div>'+(r?'<div class="usage-reset">Resets '+esc(r)+'</div>':'')+'</div>';});if(u.credits)out+='<div class="usage-kv"><span>Credits</span><strong>'+esc(u.credits)+'</strong></div>';if(u.resets)out+='<div class="usage-kv"><span>Full reset</span><strong>'+(u.resets|0)+' remaining</strong></div>';return out;}
   function set(id,v){var e=document.getElementById(id);if(e&&v!=null)e.textContent=v;}
   function messageRows(ms){if(!ms.length)return'<tr><td class="empty" colspan="7">No responses recorded since router startup.</td></tr>';return ms.map(function(m){var id=m.response_id||'—';var out='<tr><td>'+esc(new Date(m.at*1000).toLocaleTimeString())+'</td><td><code>'+esc(m.model)+'</code></td><td><code title="'+esc(id)+'">#'+esc(m.sequence)+' · '+esc(id)+'</code></td>';['input_tokens','cached_tokens','output_tokens'].forEach(function(k){out+=m[k]==null?'<td class="num" title="Not reported by upstream">—</td>':'<td class="num">'+esc(m[k].toLocaleString())+'</td>';});return out+'<td>'+esc(m.http_status)+' · '+esc(m.status)+'</td></tr>';}).join('');}
+  function tokenChart(ms){
+    var totals=[0,0,0],included=0;
+    ms.forEach(function(m){var i=m.input_tokens,c=m.cached_tokens,o=m.output_tokens;if(i==null||c==null||o==null||c>i)return;included++;totals[0]+=i-c;totals[1]+=c;totals[2]+=o;});
+    var total=totals.reduce(function(a,b){return a+b;},0);
+    if(!total)return '<p class="note">No complete token usage reported yet.</p>';
+    var labels=['Uncached input','Cached input','Output'],colors=['blue','green','amber'],start=0,stops=[],legend=[];
+    totals.forEach(function(n,k){var end=start+n/total*100;stops.push('var(--'+colors[k]+') '+start.toFixed(6)+'% '+end.toFixed(6)+'%');legend.push('<li><span class="token-key" style="background:var(--'+colors[k]+')" aria-hidden="true"></span>'+labels[k]+': <strong>'+n.toLocaleString()+'</strong> ('+(n/total*100).toFixed(1)+'%)</li>');start=end;});
+    return '<div class="token-breakdown"><div class="token-pie" aria-hidden="true" style="background:conic-gradient('+stops.join(', ')+')"></div><ul class="token-legend">'+legend.join('')+'</ul></div><p class="note">'+total.toLocaleString()+' tokens · '+included+' of '+ms.length+' recent responses. Only responses reporting all three counts are included; cached input is not counted twice.</p>';
+  }
   function apply(d){
     var notice=document.getElementById('update-status');
     var text=d.update_available?'OCX '+d.update_available+' is available. Run ocx update.':'';
     if(notice&&notice.textContent!==text)notice.textContent=text;
-    ts=Date.now();ago();if(d.messages){var mb=document.getElementById('message-rows');if(mb)mb.innerHTML=messageRows(d.messages);}if(d.groups){var n=0;d.groups.forEach(function(g){n+=(g.models||[]).length;});set('stat-models',n);set('stat-providers',d.groups.length);}if(d.usage){set('stat-plan',(d.usage.plan||'—').toUpperCase());set('stat-credits',(d.usage.credits||'—').replace(' credits',''));var ub=document.getElementById('usage-body');if(ub)ub.innerHTML=usageInner(d.usage);}var dot=document.getElementById('status-dot');if(dot&&!reduce){dot.classList.remove('pulse');void dot.offsetWidth;dot.classList.add('pulse');}}
+    ts=Date.now();ago();if(d.messages){var mb=document.getElementById('message-rows');if(mb)mb.innerHTML=messageRows(d.messages);var tc=document.getElementById('token-chart');if(tc)tc.innerHTML=tokenChart(d.messages);}if(d.groups){var n=0;d.groups.forEach(function(g){n+=(g.models||[]).length;});set('stat-models',n);set('stat-providers',d.groups.length);}if(d.usage){set('stat-plan',(d.usage.plan||'—').toUpperCase());set('stat-credits',(d.usage.credits||'—').replace(' credits',''));var ub=document.getElementById('usage-body');if(ub)ub.innerHTML=usageInner(d.usage);}var dot=document.getElementById('status-dot');if(dot&&!reduce){dot.classList.remove('pulse');void dot.offsetWidth;dot.classList.add('pulse');}}
   function refresh(){var b=document.getElementById('refresh');if(b)b.classList.add('spinning');fetch('/api/overview',{headers:{'Accept':'application/json'}}).then(function(r){if(!r.ok)throw 0;return r.json();}).then(apply).catch(function(){}).finally(function(){if(b)setTimeout(function(){b.classList.remove('spinning');},400);});}
   var rb=document.getElementById('refresh');if(rb)rb.addEventListener('click',refresh);
   setInterval(refresh,30000);
@@ -304,6 +355,10 @@ def render_landing(version: str, base_url: str, groups: list[dict], usage: dict 
   </section>
   <section class="card message-usage reveal" aria-labelledby="messages-title">
     <header class="provider-head"><h2 id="messages-title">Token usage per response</h2><span class="badge">Latest 100</span></header>
+    <section class="token-summary" aria-labelledby="token-chart-title">
+      <h3 id="token-chart-title">Token breakdown · latest 100 responses</h3>
+      <div id="token-chart">{_token_chart(messages or [])}</div>
+    </section>
     <div class="table-scroll" tabindex="0" role="region" aria-label="Per-response token usage, scroll horizontally">
       <table><caption>Token counts reported by upstream for each model response, newest first</caption>
         <thead><tr><th scope="col">Time</th><th scope="col">Model</th><th scope="col">Response</th>
