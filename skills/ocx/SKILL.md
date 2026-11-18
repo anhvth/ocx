@@ -21,19 +21,20 @@ Repo: https://github.com/anhvth/opencodex-desktop (source in `~/projects/opencod
 - The model picker and context window come from the catalog JSON the tool writes
   (`~/.local/state/ocx/model-catalog.json`).
 - The router refreshes the live GPT catalog and providers every 60 seconds (Codex's GPT cache is the
-  offline fallback). Omit `openai.include` to discover new releases automatically. Restart Codex/Pi
-  to load catalog changes; a running Codex app-server keeps its old model list.
+  offline fallback). Omit `include` and use `models: auto` for providers to discover new releases.
+  Use `exclude_regex` under `openai`, `anthropic`, or a provider to hide matches by upstream model ID.
+  Restart Codex/Pi to load catalog changes; a running Codex app-server keeps its old model list.
 - One router per machine. A Desktop chat on an SSH remote runs its app-server on the remote host,
   so the remote needs its own `start`.
 
 ## Everything the user edits
 
 `~/.config/ocx/config.yaml` (create with `ocx init`). Fields: `codex_home`
-(list of candidates; `$CODEX_HOME` wins), `listen`, `openai.{enabled,include,context_window: {slug: cap}}`, `max_context_window` (cap for every model),
-`anthropic.{enabled, api_key|api_key_env|api_key_file, base_url, models, include}` (built-in Claude
+(list of candidates; `$CODEX_HOME` wins), `listen`, `openai.{enabled,include,exclude_regex,context_window: {slug: cap}}`, `max_context_window` (cap for every model),
+`anthropic.{enabled, api_key|api_key_env|api_key_file, base_url, models, include, exclude_regex}` (built-in Claude
 provider; key defaults to `$ANTHROPIC_API_KEY`, base_url to `https://api.anthropic.com/v1`),
 `default_model`, `claude_app.ssh_hosts` (Claude app SSH sessions via a public tunnel),
-`providers.<name>.{base_url, api_key|api_key_env|api_key_file, models: auto|[...], include, wire_api,
+`providers.<name>.{base_url, api_key|api_key_env|api_key_file, models: auto|[...], include, exclude_regex, wire_api,
 headers, enabled, anthropic_url}` (`wire_api: responses|chat|anthropic`; `anthropic_url` = the
 provider's Anthropic Messages endpoint, needed for its models to show up in Claude clients), per model `{context_window,
 max_output_tokens, reasoning_efforts, default_effort, display_name, input_modalities}`.

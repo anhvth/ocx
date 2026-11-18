@@ -7,6 +7,7 @@ Everything is optional: with no config file the tool serves only your ChatGPT mo
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,7 @@ class ProviderCfg:
     enabled: bool = True
     # Native Anthropic Messages endpoint (".../v1"), used for Claude Code / Claude Desktop clients.
     anthropic_url: str | None = None
+    exclude_regex: re.Pattern[str] | None = None
 
 
 @dataclass
@@ -79,6 +81,7 @@ class Config:
     # context window caps: one for every model, and per GPT model (openai.context_window)
     max_context_window: int | None = None
     openai_context: dict[str, int] = field(default_factory=dict)
+    openai_exclude_regex: re.Pattern[str] | None = None
 
     @property
     def anthropic_base(self) -> str:
@@ -145,6 +148,18 @@ def _model(entry: Any) -> ModelCfg:
     )
 
 
+def _exclude_regex(raw: dict[str, Any], section: str) -> re.Pattern[str] | None:
+    value = raw.get("exclude_regex")
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ConfigError(f"{section}.exclude_regex must be a string")
+    try:
+        return re.compile(value)
+    except re.error as e:
+        raise ConfigError(f"{section}.exclude_regex: {e}") from e
+
+
 def _provider(name: str, pr: dict[str, Any]) -> ProviderCfg:
     if "/" in name:
         raise ConfigError(f"provider name '{name}' must not contain '/'")
@@ -170,6 +185,7 @@ def _provider(name: str, pr: dict[str, Any]) -> ProviderCfg:
         headers={str(k): str(v) for k, v in (pr.get("headers") or {}).items()},
         enabled=pr.get("enabled", True) is not False,
         anthropic_url=_anthropic_url(pr, wire),
+        exclude_regex=_exclude_regex(pr, f"provider '{name}'"),
     )
 
 
@@ -238,6 +254,7 @@ def load(path: str | os.PathLike[str] | None = None) -> Config:
         claude_ssh_hosts=[str(h) for h in ((raw.get("claude_app") or {}).get("ssh_hosts") or [])],
         max_context_window=int(raw["max_context_window"]) if raw.get("max_context_window") else None,
         openai_context={str(k): int(v) for k, v in (openai.get("context_window") or {}).items()},
+        openai_exclude_regex=_exclude_regex(openai, "openai"),
     )
 
 

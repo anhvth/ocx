@@ -135,6 +135,8 @@ def _openai_models(cfg: Config, auth: OpenAIAuth) -> list[dict[str, Any]]:
     models = [m for m in models if m.get("visibility", "list") == "list" and m.get("slug") and "/" not in m["slug"]]
     if cfg.openai_include:
         models = [m for m in models if m["slug"] in cfg.openai_include]
+    if pattern := cfg.openai_exclude_regex:
+        models = [m for m in models if not pattern.search(m["slug"])]
     for m in models:
         cap = min([c for c in (cfg.openai_context.get(m["slug"]), cfg.max_context_window) if c] or [0])
         if cap and cap < (m.get("context_window") or cap + 1):
@@ -219,6 +221,8 @@ def _discover_provider(p: ProviderCfg) -> tuple[list[Route], bool]:
 
     routes: list[Route] = []
     for m in wanted:
+        if p.exclude_regex and p.exclude_regex.search(m.id):
+            continue
         if served is not None and m.id not in served:
             ui.warn(f"{m.id}: not served by the provider; not listed")
             continue

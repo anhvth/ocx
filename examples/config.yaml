@@ -17,7 +17,7 @@ listen: 127.0.0.1:11111
 # Your ChatGPT/OpenAI models come from the Codex login (codex login / Codex app sign-in).
 openai:
   enabled: true
-  # include: [gpt-5.5, gpt-5.5-codex]   # optional allow-list
+  # exclude_regex: '-legacy$'          # optional regex matched against bare GPT slugs
   # context_window: {gpt-5.5: 256000}    # optional per-model cap
 
 # Optional cap on every model's context window (GPT and custom).
@@ -32,8 +32,8 @@ openai:
 #   enabled: true
 #   api_key_env: ANTHROPIC_API_KEY          # or api_key_file: ~/.config/anthropic/api_key, or api_key: sk-ant-...
 #   base_url: https://api.anthropic.com/v1  # any Anthropic-compatible gateway works too
-#   models: auto                            # everything /v1/models lists, or an explicit list like below
-#   # include: [claude-sonnet, claude-opus] # substring filter for `auto`
+#   models: auto                           # everything /v1/models returns unless excluded
+#   # exclude_regex: '-legacy$'            # optional regex matched against upstream model IDs
 
 # Any OpenAI-compatible endpoint. Models that are unreachable or not served are dropped.
 # Context window: value here, else what the provider's /models reports, else 128k (with a warning).
@@ -44,15 +44,11 @@ providers:
     # wire_api: responses                          # auto-detected (responses vs chat) if omitted
     # Anthropic Messages endpoint: makes these models usable from Claude Code and the Claude app too.
     anthropic_url: https://token-plan.maas.qwencloudapi.com/apps/anthropic/v1
-    models:
-      - qwen4-max: {context_window: 300000, input_modalities: [text, image]}
-      - qwen3.8-max:
-          context_window: 1000000
-          max_output_tokens: 131072
+    models: auto
+    exclude_regex: '(?i)(embedding|rerank|tts|asr)'
 
   local-vllm:
     enabled: false              # flip to true on a machine that runs vLLM
     base_url: http://127.0.0.1:7788/v1
     models: auto                # every served model; vLLM reports max_model_len itself
-    # include: [DeepSeek]       # substring filter for `auto`
     # Claude clients use vLLM's own /v1/messages (anthropic_url defaults to base_url for local hosts).

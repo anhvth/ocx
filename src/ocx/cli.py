@@ -239,8 +239,11 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     else:
         ui.info(f"Codex is on its default provider ({doc.get('model_provider', 'openai')}); router is off for Codex")
     if cfg.openai_enabled and auth.mode != "none":
-        available = {m["slug"] for m in _openai_models(replace(cfg, openai_include=[]), auth)}
-        allowed = available & set(cfg.openai_include) if cfg.openai_include else available
+        unfiltered = replace(cfg, openai_include=[], openai_exclude_regex=None)
+        available = {m["slug"] for m in _openai_models(unfiltered, auth)}
+        included = available & set(cfg.openai_include) if cfg.openai_include else available
+        pattern = cfg.openai_exclude_regex
+        excluded = {slug for slug in included if pattern and pattern.search(slug)}
         listed = set()
         if doc.get("model_catalog_json"):
             try:
@@ -249,10 +252,12 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             except (OSError, ValueError, KeyError, TypeError):
                 pass
         ui.info("GPT in configured catalog: " + (", ".join(sorted(s for s in listed if "/" not in s)) or "(none)"))
-        if available - allowed:
-            ui.info("GPT excluded by openai.include: " + ", ".join(sorted(available - allowed)))
-        if allowed - listed:
-            ui.warn("GPT available but missing from catalog: " + ", ".join(sorted(allowed - listed))
+        if available - included:
+            ui.info("GPT excluded by openai.include: " + ", ".join(sorted(available - included)))
+        if excluded:
+            ui.info("GPT excluded by openai.exclude_regex: " + ", ".join(sorted(excluded)))
+        if missing := included - excluded - listed:
+            ui.warn("GPT available but missing from catalog: " + ", ".join(sorted(missing))
                     + " (run `ocx start`)")
     from .discovery import http_json, provider_headers
     routes = load_routes()

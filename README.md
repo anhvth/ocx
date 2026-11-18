@@ -85,7 +85,7 @@ with uv, then `ocx start` to load it into the router.
 |---|---|
 | `start` (default) | reads the YAML, checks every provider, configures Codex, Claude and Pi, and (re)starts the router in the background |
 | `off` | stops the router, removes its Codex/Claude settings, and restores Pi's previous model scope and defaults |
-| `status` | checks the GPT model list and shows catalog gaps, allowlist exclusions, and routed models |
+| `status` | checks the GPT model list and shows catalog gaps, exclusions, and routed models |
 | `update` | updates the installed package from GitHub without restarting the running router |
 | `stop` | stops only the router (Codex stays pointed at it) |
 | `init` | writes an example config (`--force` overwrites an existing one) |
@@ -124,9 +124,9 @@ providers:
   alibaba:
     base_url: https://token-plan.maas.qwencloudapi.com/compatible-mode/v1
     api_key_file: ~/.config/claude-alibaba/token   # or api_key_env: VAR, or api_key: sk-...
-    models:
-      - qwen4-max: {context_window: 300000, input_modalities: [text, image]}
-      - qwen3.8-max:       {context_window: 1000000, max_output_tokens: 131072}
+    anthropic_url: https://token-plan.maas.qwencloudapi.com/apps/anthropic/v1
+    models: auto
+    exclude_regex: '(?i)(embedding|rerank|tts|asr)'
   local-vllm:
     base_url: http://127.0.0.1:7788/v1
     models: auto                # everything the server lists
@@ -135,13 +135,17 @@ providers:
 Also supported (see [`examples/config.yaml`](examples/config.yaml) for all fields):
 
 - `anthropic` — built-in Claude provider: `api_key` / `api_key_env` (default `ANTHROPIC_API_KEY`) /
-  `api_key_file`, `base_url` (any Anthropic-compatible gateway), `models: auto` or a list, `include`,
-  `enabled`. Needs an Anthropic **API key**, not a Claude subscription.
-- `openai.include` — optional allow-list of GPT slugs to expose. Omit it to include newly released GPT
-  models automatically.
-- Per provider: `enabled`, `headers`, `wire_api` (`responses`/`chat`/`anthropic`, auto-detected if omitted),
-  and `include` — substring filters when `models: auto`.
-- Per model: `display_name`, `reasoning_efforts`, `default_effort`, `input_modalities`.
+  `api_key_file`, `base_url` (any Anthropic-compatible gateway), and the provider options below.
+  Needs an Anthropic **API key**, not a Claude subscription.
+- `exclude_regex` — optional Python regex under `openai`, `anthropic`, or a provider. A match anywhere
+  in the upstream model ID (the bare slug for OpenAI) excludes it. Use `(?i)` for case-insensitive matching.
+- Providers default to `models: auto`, which discovers every model returned by `/models`. Replace a
+  `models` list with `models: auto` and remove any `include` allowlist to discover new models automatically.
+  Existing `include` filters (provider ID substrings in auto mode, exact GPT slugs for OpenAI) and explicit
+  `models` lists still work; `exclude_regex` can narrow them further.
+- Per provider: `enabled`, `headers`, `wire_api` (`responses`/`chat`/`anthropic`, auto-detected if omitted).
+- In an explicit `models` list, entries can set `context_window`, `max_output_tokens`, `display_name`,
+  `reasoning_efforts`, `default_effort`, and `input_modalities`.
 
 ### What `start` checks
 
@@ -151,7 +155,7 @@ Also supported (see [`examples/config.yaml`](examples/config.yaml) for all field
 - **Model updates**: the router checks the live GPT catalog and providers every 60 seconds, falling back
   to Codex's cached GPT list if the live catalog is unavailable. Changes update the generated catalog and
   Pi configuration. Restart the Codex app (or `codex app-server daemon restart` for CLI/TUI) and Pi to
-  load an updated list; an `openai.include` allow-list still limits which GPT models appear.
+  load an updated list. Configured filters still apply on refresh.
 - **Unreachable provider / bad key / model not served**: you get a ✗ line and those models are **dropped**,
   so Codex never shows a model that cannot answer.
 - **Context window**: taken from the config if set, else from what the provider's `/models` reports (vLLM's

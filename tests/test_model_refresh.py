@@ -41,6 +41,47 @@ def test_live_gpt_catalog_replaces_stale_cache(tmp_path, monkeypatch, failure):
         assert discovery._openai_models(cfg, auth) == []
 
 
+def test_exclude_regex_filters_discovered_models_before_probing(tmp_path, monkeypatch):
+    path = tmp_path / "ocx.yaml"
+    path.write_text("""\
+openai:
+  exclude_regex: '-legacy$'
+providers:
+  local-vllm:
+    base_url: http://localhost/v1
+    exclude_regex: '(?i)(?:embed|rerank)'
+""")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    cfg = config.load(path)
+    (tmp_path / "models_cache.json").write_text(json.dumps({"models": [
+        {"slug": "gpt-old-legacy"}, {"slug": "gpt-new"},
+    ]}))
+    assert [m["slug"] for m in discovery._openai_models(cfg, discovery.OpenAIAuth("apikey"))] == ["gpt-new"]
+
+    models = ["team/Tokenizer-EMBED", "reranker", "team/Chat-New", "OtherNewModel"]
+    monkeypatch.setattr(discovery, "http_json", lambda *a, **k: (200, {"data": [
+        {"id": name, "max_model_len": 65_536} for name in models
+    ]}))
+    probes = []
+
+    def detect_wire(provider, model, headers):
+        probes.append(model)
+        return "responses"
+
+    monkeypatch.setattr(discovery, "_detect_wire", detect_wire)
+    routes, ok = discovery._discover_provider(cfg.providers[0])
+    assert ok and probes == models[2:]
+    assert [r.slug for r in routes] == ["local-vllm/team/Chat-New", "local-vllm/OtherNewModel"]
+
+
+@pytest.mark.parametrize("value", ["'['", "[foo, bar]"])
+def test_invalid_exclude_regex_is_a_config_error(tmp_path, value):
+    path = tmp_path / "ocx.yaml"
+    path.write_text(f"openai:\n  exclude_regex: {value}\n")
+    with pytest.raises(config.ConfigError, match=r"openai\.exclude_regex"):
+        config.load(path)
+
+
 def test_gpt_only_monitor_starts(tmp_path, monkeypatch):
     monkeypatch.setattr(router, "load_routes", lambda: [])
     monkeypatch.setattr(router, "router_token", lambda: "test")
