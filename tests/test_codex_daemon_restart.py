@@ -60,3 +60,43 @@ def test_start_restarts_stale_running_codex_daemon(tmp_path, monkeypatch, capsys
     assert ("predates the model catalog" in out) is restart
     assert commands == (["version"] if stale else []) + (["restart"] if restart else [])
     assert catalog.stat().st_mtime_ns == catalog_mtime
+
+
+def test_restart_rejected_unmanaged_server_warns_without_raw_error(tmp_path, monkeypatch, capsys):
+    # `daemon version` reports the on-disk managed package version even when the
+    # running app-server was launched outside the daemon; only `restart` reveals it.
+    cfg = SimpleNamespace(codex_home=tmp_path)
+    catalog = tmp_path / "model-catalog.json"
+    catalog.write_text("{}")
+    commands = []
+
+    def run(cmd, *, env, **kwargs):
+        commands.append(cmd[-1])
+        if cmd[-1] == "version":
+            return SimpleNamespace(returncode=0, stderr="",
+                                   stdout='{"status":"running","managedCodexVersion":"0.171.0"}')
+        return SimpleNamespace(returncode=1, stdout="",
+                               stderr="Error: app server is running but is not managed by codex app-server daemon\n")
+
+    monkeypatch.setattr(cli.subprocess, "run", run)
+    with socket.socket(socket.AF_UNIX) as listener:
+        socket_dir = tmp_path / "app-server-control"
+        socket_dir.mkdir()
+        sock = socket_dir / "app-server-control.sock"
+        cwd_fd = os.open(".", os.O_RDONLY)
+        try:
+            os.chdir(socket_dir)
+            listener.bind(sock.name)
+        finally:
+            os.fchdir(cwd_fd)
+            os.close(cwd_fd)
+        listener.listen()
+        os.utime(sock, (100, 100))
+        os.utime(catalog, (200, 200))
+        cli._restart_stale_codex(cfg, catalog)
+
+    out = capsys.readouterr().out
+    assert commands == ["version", "restart"]
+    assert "outside the Codex daemon" in out
+    assert "Could not restart" not in out
+    assert "Error:" not in out

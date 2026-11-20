@@ -155,14 +155,15 @@ def _restart_stale_codex(cfg: Config, catalog: Path) -> None:
     cmd = ["codex", "app-server", "daemon"]
     env = {**os.environ, "CODEX_HOME": str(cfg.codex_home)}
     manual = "Run `codex app-server daemon restart` when ready."
+    unmanaged = ("The running app-server was launched outside the Codex daemon. "
+                 "Reconnect the Codex SSH session or relaunch the client that owns it to reload the catalog.")
     try:
         status = subprocess.run([*cmd, "version"], env=env, capture_output=True, text=True, timeout=3)
         info = json.loads(status.stdout) if status.returncode == 0 else None
         if not isinstance(info, dict) or info.get("status") != "running":
             return
         if "managedCodexVersion" in info and info["managedCodexVersion"] is None:
-            ui.warn("The running app-server was launched outside the Codex daemon. "
-                    "Reconnect the Codex SSH session or relaunch the client that owns it to reload the catalog.")
+            ui.warn(unmanaged)
             return
     except (OSError, ValueError, subprocess.TimeoutExpired):
         ui.warn(f"Could not check the Codex daemon. {manual}")
@@ -170,10 +171,16 @@ def _restart_stale_codex(cfg: Config, catalog: Path) -> None:
 
     ui.warn("Codex's running app-server predates the model catalog; restarting it (open CLI sessions reconnect).")
     try:
-        result = subprocess.run([*cmd, "restart"], env=env, timeout=60)
+        result = subprocess.run([*cmd, "restart"], env=env, timeout=60, capture_output=True, text=True)
         if result.returncode == 0:
             ui.ok("Codex app-server restarted")
             return
+        # `daemon version` reports the on-disk managed package even when the running
+        # server is unmanaged, so the None check above can miss it; restart tells the truth.
+        if "not managed" in (result.stderr or "") + (result.stdout or ""):
+            ui.warn(unmanaged)
+            return
+        ui.err((result.stderr or result.stdout or "").strip())
     except (OSError, subprocess.TimeoutExpired) as e:
         ui.warn(str(e))
     ui.warn(f"Could not restart the Codex daemon. {manual}")
