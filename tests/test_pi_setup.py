@@ -71,6 +71,33 @@ def test_pi_sync_restore(tmp_path, monkeypatch):
     pi_setup.restore_pi_config(cfg)
 
 
+@pytest.mark.parametrize("scope, kept", [
+    # Stale OCX-only scope: dropped so newly discovered models are listed again.
+    (["ocx/gone"], False),
+    # Live OCX scope, a scope holding other providers, and hand-written glob/level
+    # patterns are the user's choice.
+    (["ocx/gpt-test"], True),
+    (["ocx/gone", "other/x"], True),
+    (["ocx/*"], True),
+    (["ocx/gone:high"], True),
+])
+def test_pi_sync_keeps_scope_unless_it_names_a_removed_model(tmp_path, monkeypatch, scope, kept):
+    home = tmp_path / "pi"
+    home.mkdir()
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(home))
+    monkeypatch.setattr(config, "TOKEN_FILE", tmp_path / "token")
+    monkeypatch.setattr(pi_setup, "TOKEN_FILE", tmp_path / "token")
+    (home / "settings.json").write_text(json.dumps({"defaultModel": "gpt-test", "enabledModels": scope}))
+    cfg = SimpleNamespace(base_url="http://localhost:12345/v1")
+    pi_setup.apply_pi_config(cfg, Discovery(OpenAIAuth("chatgpt"), [{"slug": "gpt-test"}], []))
+    settings = json.loads((home / "settings.json").read_text())
+    if kept:
+        assert settings["enabledModels"] == scope
+    else:
+        assert "enabledModels" not in settings
+    assert settings["defaultModel"] == "gpt-test"
+
+
 @pytest.mark.parametrize("gateway", [True, False])
 def test_gateway_openai_auth(tmp_path, monkeypatch, gateway):
     monkeypatch.setattr(config, "TOKEN_FILE", tmp_path / "token")

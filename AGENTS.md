@@ -72,6 +72,11 @@ Codex caches its catalog at app-server startup (see below). Pi reloads `models.j
 opens; reselect the model to use refreshed metadata. Generating config does not guarantee an already
 running client has refreshed its in-memory model.
 
+Pi treats a non-empty `enabledModels` as an allowlist, so a scope written from an older discovery
+hides every model added since. Pi sync therefore removes an OCX-only scope that names a model no
+longer discovered, restoring the full list; a live selection, one naming another provider's models,
+or a hand-written glob/`:level` pattern is the user's choice and stays untouched.
+
 ### Verified local DeepSeek behavior
 
 Direct checks against `http://127.0.0.1:7788/v1/responses` for

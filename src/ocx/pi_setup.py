@@ -86,6 +86,32 @@ def _restore_legacy_scope(home: Path, providers: dict, backups: dict) -> None:
             return
 
 
+def _drop_stale_scope(home: Path, rows: list[dict]) -> None:
+    """Drop an OCX-generated picker scope that outlived its models.
+
+    Pi treats a non-empty `enabledModels` as an allowlist, so a scope written from an older
+    discovery hides every model added since. Only an OCX-only scope naming a model that no longer
+    exists is removed, which puts every discovered model back in the picker; a scope mixing other
+    providers, or naming only live models, is the user's choice and is left alone.
+    """
+    path = home / "settings.json"
+    settings = _read(path)
+    scope = settings.get("enabledModels")
+    prefixes = (f"{PROVIDER}/", f"{LEGACY_PROVIDER_ID}/")
+    if not isinstance(scope, list) or not scope:
+        return
+    # A glob or a `:<level>` suffix is a hand-written pattern; leave the whole scope alone.
+    if not all(isinstance(e, str) and e.startswith(prefixes) and not any(c in e for c in "*?[{:")
+               for e in scope):
+        return
+    ids = {row["id"] for row in rows}
+    ours = {e.split("/", 1)[1] for e in scope}
+    if ours <= ids:
+        return
+    settings.pop("enabledModels")
+    _write(path, settings)
+
+
 def apply_pi_config(cfg: Config, d: Discovery) -> None:
     home = agent_home()
     if not home.is_dir():
@@ -107,6 +133,7 @@ def apply_pi_config(cfg: Config, d: Discovery) -> None:
     if LEGACY_PROVIDER_ID in backups and LEGACY_PROVIDER_ID in providers:
         providers[LEGACY_PROVIDER_ID] = providers[PROVIDER].copy()  # Old Pi sessions store the provider ID.
     _write(models_path, models)
+    _drop_stale_scope(home, rows)
     ui.ok(f"updated {models_path} ({len(rows)} models)")
 
 
