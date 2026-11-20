@@ -175,12 +175,14 @@ def _restart_stale_codex(cfg: Config, catalog: Path) -> None:
         if result.returncode == 0:
             ui.ok("Codex app-server restarted")
             return
-        # `daemon version` reports the on-disk managed package even when the running
-        # server is unmanaged, so the None check above can miss it; restart tells the truth.
-        if "not managed" in (result.stderr or "") + (result.stdout or ""):
+        # `daemon version` can report an installed package for an unmanaged running server.
+        not_managed = "app server is running but is not managed by codex app-server daemon"
+        if not_managed in result.stderr or not_managed in result.stdout:
             ui.warn(unmanaged)
             return
-        ui.err((result.stderr or result.stdout or "").strip())
+        detail = result.stderr.strip() or result.stdout.strip()
+        if detail:
+            ui.err(detail)
     except (OSError, subprocess.TimeoutExpired) as e:
         ui.warn(str(e))
     ui.warn(f"Could not restart the Codex daemon. {manual}")

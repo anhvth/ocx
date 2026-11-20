@@ -62,21 +62,26 @@ def test_start_restarts_stale_running_codex_daemon(tmp_path, monkeypatch, capsys
     assert catalog.stat().st_mtime_ns == catalog_mtime
 
 
-def test_restart_rejected_unmanaged_server_warns_without_raw_error(tmp_path, monkeypatch, capsys):
-    # `daemon version` reports the on-disk managed package version even when the
-    # running app-server was launched outside the daemon; only `restart` reveals it.
+@pytest.mark.parametrize(("stderr", "stdout", "unmanaged"), [
+    ("Error: app server is running but is not managed by codex app-server daemon\n", "", True),
+    ("", "Error: app server is running but is not managed by codex app-server daemon\n", True),
+    ("Error: daemon config is not managed by this tool\n", "", False),
+    ("", "", False),
+])
+def test_daemon_restart_failure_reports_the_right_guidance(tmp_path, monkeypatch, capsys, stderr, stdout, unmanaged):
+    # `daemon version` reports the installed managed package even if the running server is unmanaged.
     cfg = SimpleNamespace(codex_home=tmp_path)
     catalog = tmp_path / "model-catalog.json"
     catalog.write_text("{}")
     commands = []
 
-    def run(cmd, *, env, **kwargs):
+    def run(cmd, *, env, capture_output, text, timeout):
+        assert capture_output and text
         commands.append(cmd[-1])
         if cmd[-1] == "version":
             return SimpleNamespace(returncode=0, stderr="",
                                    stdout='{"status":"running","managedCodexVersion":"0.171.0"}')
-        return SimpleNamespace(returncode=1, stdout="",
-                               stderr="Error: app server is running but is not managed by codex app-server daemon\n")
+        return SimpleNamespace(returncode=1, stdout=stdout, stderr=stderr)
 
     monkeypatch.setattr(cli.subprocess, "run", run)
     with socket.socket(socket.AF_UNIX) as listener:
@@ -97,6 +102,7 @@ def test_restart_rejected_unmanaged_server_warns_without_raw_error(tmp_path, mon
 
     out = capsys.readouterr().out
     assert commands == ["version", "restart"]
-    assert "outside the Codex daemon" in out
-    assert "Could not restart" not in out
-    assert "Error:" not in out
+    assert ("outside the Codex daemon" in out) is unmanaged
+    assert ("Could not restart" in out) is not unmanaged
+    assert ("Error:" in out) is (not unmanaged and bool(stderr or stdout))
+    assert ("✗" in out) is (not unmanaged and bool(stderr or stdout))
