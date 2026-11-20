@@ -103,6 +103,6 @@ def test_daemon_restart_failure_reports_the_right_guidance(tmp_path, monkeypatch
     out = capsys.readouterr().out
     assert commands == ["version", "restart"]
     assert ("outside the Codex daemon" in out) is unmanaged
-    assert ("Could not restart" in out) is not unmanaged
+    assert ("could not be restarted" in out) is not unmanaged
     assert ("Error:" in out) is (not unmanaged and bool(stderr or stdout))
     assert ("✗" in out) is (not unmanaged and bool(stderr or stdout))
