@@ -100,7 +100,9 @@ def _drop_stale_scope(home: Path, rows: list[dict]) -> None:
     prefixes = (f"{PROVIDER}/", f"{LEGACY_PROVIDER_ID}/")
     if not isinstance(scope, list) or not scope:
         return
-    if not all(isinstance(e, str) and e.startswith(prefixes) for e in scope):
+    # A glob or a `:<level>` suffix is a hand-written pattern; leave the whole scope alone.
+    if not all(isinstance(e, str) and e.startswith(prefixes) and not any(c in e for c in "*?[{:")
+               for e in scope):
         return
     ids = {row["id"] for row in rows}
     ours = {e.split("/", 1)[1] for e in scope}

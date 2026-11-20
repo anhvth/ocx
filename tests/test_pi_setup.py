@@ -74,9 +74,12 @@ def test_pi_sync_restore(tmp_path, monkeypatch):
 @pytest.mark.parametrize("scope, kept", [
     # Stale OCX-only scope: dropped so newly discovered models are listed again.
     (["ocx/gone"], False),
-    # Live OCX scope and a scope holding other providers are the user's choice.
+    # Live OCX scope, a scope holding other providers, and hand-written glob/level
+    # patterns are the user's choice.
     (["ocx/gpt-test"], True),
     (["ocx/gone", "other/x"], True),
+    (["ocx/*"], True),
+    (["ocx/gone:high"], True),
 ])
 def test_pi_sync_keeps_scope_unless_it_names_a_removed_model(tmp_path, monkeypatch, scope, kept):
     home = tmp_path / "pi"

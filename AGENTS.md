@@ -74,8 +74,8 @@ running client has refreshed its in-memory model.
 
 Pi treats a non-empty `enabledModels` as an allowlist, so a scope written from an older discovery
 hides every model added since. Pi sync therefore removes an OCX-only scope that names a model no
-longer discovered, restoring the full list; a live selection, or one naming another provider's
-models, is the user's choice and stays untouched.
+longer discovered, restoring the full list; a live selection, one naming another provider's models,
+or a hand-written glob/`:level` pattern is the user's choice and stays untouched.
 
 ### Verified local DeepSeek behavior
 
