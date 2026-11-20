@@ -3,6 +3,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import tomlkit
@@ -207,6 +208,8 @@ def test_claude_unmanaged_symlink_is_not_written(tmp_path, monkeypatch):
 
 
 def test_claude_apply_and_restore(tmp_path, monkeypatch):
+    monkeypatch.setattr(claude_setup, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(claude_setup, "_desktop_running", lambda: False)
     monkeypatch.setenv("DOTFILES_DIR", str(tmp_path))
     monkeypatch.setattr(config, "TOKEN_FILE", tmp_path / "token")
     monkeypatch.setattr(claude_setup, "CLAUDE_HOME", tmp_path / "claude")

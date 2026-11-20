@@ -60,3 +60,49 @@ def test_start_restarts_stale_running_codex_daemon(tmp_path, monkeypatch, capsys
     assert ("predates the model catalog" in out) is restart
     assert commands == (["version"] if stale else []) + (["restart"] if restart else [])
     assert catalog.stat().st_mtime_ns == catalog_mtime
+
+
+@pytest.mark.parametrize(("stderr", "stdout", "unmanaged"), [
+    ("Error: app server is running but is not managed by codex app-server daemon\n", "", True),
+    ("", "Error: app server is running but is not managed by codex app-server daemon\n", True),
+    ("Error: daemon config is not managed by this tool\n", "", False),
+    ("", "", False),
+])
+def test_daemon_restart_failure_reports_the_right_guidance(tmp_path, monkeypatch, capsys, stderr, stdout, unmanaged):
+    # `daemon version` reports the installed managed package even if the running server is unmanaged.
+    cfg = SimpleNamespace(codex_home=tmp_path)
+    catalog = tmp_path / "model-catalog.json"
+    catalog.write_text("{}")
+    commands = []
+
+    def run(cmd, *, env, capture_output, text, timeout):
+        assert capture_output and text
+        commands.append(cmd[-1])
+        if cmd[-1] == "version":
+            return SimpleNamespace(returncode=0, stderr="",
+                                   stdout='{"status":"running","managedCodexVersion":"0.171.0"}')
+        return SimpleNamespace(returncode=1, stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr(cli.subprocess, "run", run)
+    with socket.socket(socket.AF_UNIX) as listener:
+        socket_dir = tmp_path / "app-server-control"
+        socket_dir.mkdir()
+        sock = socket_dir / "app-server-control.sock"
+        cwd_fd = os.open(".", os.O_RDONLY)
+        try:
+            os.chdir(socket_dir)
+            listener.bind(sock.name)
+        finally:
+            os.fchdir(cwd_fd)
+            os.close(cwd_fd)
+        listener.listen()
+        os.utime(sock, (100, 100))
+        os.utime(catalog, (200, 200))
+        cli._restart_stale_codex(cfg, catalog)
+
+    out = capsys.readouterr().out
+    assert commands == ["version", "restart"]
+    assert ("outside the Codex daemon" in out) is unmanaged
+    assert ("Could not restart" in out) is not unmanaged
+    assert ("Error:" in out) is (not unmanaged and bool(stderr or stdout))
+    assert ("✗" in out) is (not unmanaged and bool(stderr or stdout))
