@@ -169,11 +169,11 @@ def _restart_stale_codex(cfg: Config, catalog: Path) -> None:
         ui.warn(f"Could not check the Codex daemon. {manual}")
         return
 
-    ui.warn("Codex's running app-server predates the model catalog; restarting it (open CLI sessions reconnect).")
     try:
+        # Capture the daemon's JSON status blobs so they do not clutter `ocx start`.
         result = subprocess.run([*cmd, "restart"], env=env, timeout=60, capture_output=True, text=True)
         if result.returncode == 0:
-            ui.ok("Codex app-server restarted")
+            ui.ok("Codex's running app-server predates the model catalog; restarted it (open CLI sessions reconnect)")
             return
         # `daemon version` can report an installed package for an unmanaged running server.
         not_managed = "app server is running but is not managed by codex app-server daemon"
@@ -185,7 +185,7 @@ def _restart_stale_codex(cfg: Config, catalog: Path) -> None:
             ui.err(detail)
     except (OSError, subprocess.TimeoutExpired) as e:
         ui.warn(str(e))
-    ui.warn(f"Could not restart the Codex daemon. {manual}")
+    ui.warn(f"Codex app-server predates the model catalog and could not be restarted. {manual}")
 
 
 def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
@@ -232,9 +232,8 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     if d.errors:
         ui.warn(f"{d.errors} provider(s) unavailable (see ⚠ above); their models are not listed in Codex")
     _restart_stale_codex(cfg, catalog)
-    ui.info("If the Codex Desktop app still shows the old list, quit and reopen it.")
-    ui.info("Claude Code (`claude`, `cl`) sees the new models in /model right away.")
-    ui.info("Pi: restart to refresh the model list. In /model, Enter switches for this session; Ctrl+S saves the default.")
+    ui.info("Codex Desktop: quit and reopen it if the old model list is still shown.")
+    ui.info("Claude Code sees the new models now; restart Pi to refresh /model (Ctrl+S saves the default).")
     ui.info("Turn it off any time with: ocx off")
     return 0
 
